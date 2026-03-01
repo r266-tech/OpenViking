@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenViking Console</title>
+    <link rel="stylesheet" href="/console/styles.css" />
+  </head>
+  <body>
+    <div class="workspace">
+      <main class="content">
+        <nav class="tabs tabs-top" aria-label="Capabilities">
+          <button id="tab-filesystem" class="tab active" data-panel="filesystem">Filesystem</button>
+          <button id="tab-find" class="tab" data-panel="find">Find</button>
+          <button id="tab-add-resource" class="tab" data-panel="add-resource">Add Resource</button>
+          <button id="tab-tenants" class="tab" data-panel="tenants">Tenants</button>
+          <button id="tab-monitor" class="tab" data-panel="monitor">Monitor</button>
+          <button id="tab-settings" class="tab" data-panel="settings">Settings</button>
+          <span class="tabs-title" aria-label="OpenViking Console">
+            <span class="tabs-title-text">OpenViking Console</span>
+          </span>
+        </nav>
+
+        <div class="panel-stack">
+          <section id="panel-filesystem" class="panel active">
+            <h2>Filesystem</h2>
+            <p class="panel-subtitle">Browse viking:// paths.</p>
+            <div class="row wrap">
+              <button id="fsBackBtn" class="ghost">Back</button>
+              <button id="fsUpBtn" class="ghost">Up</button>
+              <button id="fsRefreshBtn" class="ghost">Refresh</button>
+            </div>
+            <div class="row">
+              <input id="fsCurrentUri" type="text" value="viking://" aria-label="Current URI" />
+              <button id="fsGoBtn">Go</button>
+            </div>
+            <div class="fs-table-wrap">
+              <table class="fs-table">
+                <thead>
+                  <tr>
+                    <th
+                      id="fsColAction"
+                      scope="col"
+                      data-min-width="34"
+                      data-resizable="false"
+                      aria-label="open file content"
+                    ></th>
+                    <th id="fsColUri" scope="col" data-min-width="220">
+                      <button class="fs-sort-btn" data-fs-sort="uri" aria-sort="none">uri</button>
+                    </th>
+                    <th id="fsColSize" scope="col" data-min-width="90">
+                      <button class="fs-sort-btn" data-fs-sort="size" aria-sort="none">size</button>
+                    </th>
+                    <th id="fsColIsDir" scope="col" data-min-width="90">
+                      <button class="fs-sort-btn" data-fs-sort="isDir" aria-sort="none">isDir</button>
+                    </th>
+                    <th id="fsColModTime" scope="col" data-min-width="160">
+                      <button class="fs-sort-btn" data-fs-sort="modTime" aria-sort="none">modTime</button>
+                    </th>
+                    <th id="fsColAbstract" scope="col" data-min-width="220">
+                      <button class="fs-sort-btn" data-fs-sort="abstract" aria-sort="none">abstract</button>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody id="fsEntries"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section id="panel-find" class="panel">
+            <h2>Find</h2>
+            <p class="panel-subtitle">Run semantic find against a scope and inspect matched results.</p>
+            <label for="findQuery">Query</label>
+            <input id="findQuery" type="text" placeholder="Search query" />
+            <label for="findTarget">Target URI (optional)</label>
+            <input id="findTarget" type="text" placeholder="viking://resources/" />
+            <button id="findBtn">Run Find</button>
+            <div class="find-table-wrap">
+              <table class="find-table">
+                <thead id="findResultsHead"></thead>
+                <tbody id="findResultsBody"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section id="panel-add-resource" class="panel">
+            <h2>Add Resource</h2>
+            <p class="panel-subtitle">Submit add-resource with local path or upload a file first.</p>
+            <label for="addResourcePath">Path on OpenViking server (optional)</label>
+            <input id="addResourcePath" type="text" placeholder="/abs/path/on/server/or/dir" />
+            <label for="addResourceFile">Upload file for temp path (optional)</label>
+            <input id="addResourceFile" type="file" />
+            <label for="addResourceTarget">Target URI (optional)</label>
+            <input id="addResourceTarget" type="text" placeholder="viking://resources/" />
+            <div class="row wrap checks">
+              <label class="check-item" for="addResourceWait">
+                <input id="addResourceWait" type="checkbox" />
+                <span>wait</span>
+              </label>
+              <label class="check-item" for="addResourceStrict">
+                <input id="addResourceStrict" type="checkbox" checked />
+                <span>strict</span>
+              </label>
+              <label class="check-item" for="addResourceUploadMedia">
+                <input id="addResourceUploadMedia" type="checkbox" checked />
+                <span>directly_upload_media</span>
+              </label>
+            </div>
+            <label for="addResourceTimeout">Timeout seconds (optional)</label>
+            <input id="addResourceTimeout" type="number" min="0" step="0.1" placeholder="30" />
+            <label for="addResourceIgnoreDirs">ignore_dirs (optional, comma-separated)</label>
+            <input id="addResourceIgnoreDirs" type="text" placeholder=".git,node_modules,.venv" />
+            <label for="addResourceInclude">include pattern (optional)</label>
+            <input id="addResourceInclude" type="text" placeholder="*.md,*.txt" />
+            <label for="addResourceExclude">exclude pattern (optional)</label>
+            <input id="addResourceExclude" type="text" placeholder="*.log,*.tmp" />
+            <label for="addResourceReason">Reason (optional)</label>
+            <textarea id="addResourceReason" rows="2" placeholder="Why add this resource?"></textarea>
+            <label for="addResourceInstruction">Instruction (optional)</label>
+            <textarea
+              id="addResourceInstruction"
+              rows="2"
+              placeholder="How should OpenViking process this resource?"
+            ></textarea>
+            <div class="row wrap">
+              <button id="addResourceBtn">Add by Path</button>
+              <button id="addResourceUploadBtn" class="ghost">Upload & Add</button>
+            </div>
+            <p class="muted">Use either path or upload. Result panel will show backend response.</p>
+          </section>
+
+          <section id="panel-tenants" class="panel">
+            <h2>Tenants</h2>
+            <p class="panel-subtitle">Inspect accounts/users and trigger guarded write operations.</p>
+            <div class="row">
+              <button id="accountsBtn">List Accounts</button>
+              <button id="createAccountBtn" class="danger">Create Account</button>
+            </div>
+            <div class="row">
+              <input id="usersAccountId" type="text" placeholder="account_id" />
+              <button id="usersBtn">List Users</button>
+            </div>
+            <ul id="tenantResults" class="list"></ul>
+          </section>
+
+          <section id="panel-monitor" class="panel">
+            <h2>Monitor</h2>
+            <p class="panel-subtitle">Check runtime status and observer health snapshots.</p>
+            <div class="row">
+              <button id="systemBtn">System Status</button>
+              <button id="observerBtn">Observer(System)</button>
+            </div>
+            <ul id="monitorResults" class="list"></ul>
+          </section>
+
+          <section id="panel-settings" class="panel">
+            <h2>Settings</h2>
+            <p class="panel-subtitle">Configure console session values and authentication.</p>
+            <div class="row wrap">
+              <span id="writeBadge" class="badge">Readonly</span>
+            </div>
+            <label for="apiKeyInput">X-API-Key</label>
+            <input id="apiKeyInput" type="password" placeholder="Paste key for this browser session" />
+            <div class="row">
+              <button id="saveKeyBtn">Save</button>
+              <button id="clearKeyBtn" class="ghost">Clear</button>
+            </div>
+            <p id="connectionHint" class="muted">No API key in session.</p>
+          </section>
+        </div>
+
+        <div id="outputResizer" class="resizer resizer-horizontal" role="separator" aria-orientation="horizontal"></div>
+
+        <section class="result-card">
+          <h2>Result</h2>
+          <pre id="output">Ready.</pre>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="/console/app.js"></script>
+  </body>
+</html>
