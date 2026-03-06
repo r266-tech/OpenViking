@@ -18,6 +18,7 @@ Usage:
 """
 
 import argparse
+import csv
 import json
 import os
 import re
@@ -519,7 +520,15 @@ def run_task(
             raise Exception(f"vikingbot failed: {proc.stderr}")
         # Parse JSON response
         try:
-            bot_result = json.loads(proc.stdout.strip(), strict=False)
+            raw_output = proc.stdout.strip()
+            if not raw_output:
+                raise Exception("vikingbot returned empty output")
+            # Locate JSON object start
+            json_start = raw_output.find("{")
+            if json_start == -1:
+                raise Exception("No JSON object found in response")
+            json_content = raw_output[json_start:]
+            bot_result = json.loads(json_content, strict=False)
             response = bot_result["text"]
             usage = {
                 "input_tokens": bot_result["token_usage"]["prompt_tokens"],
@@ -611,52 +620,168 @@ def run_run(args: argparse.Namespace) -> None:
     output_base.mkdir(parents=True, exist_ok=True)
     WORK_DIR.mkdir(parents=True, exist_ok=True)
 
-    results = []
+    # Skip tasks already present in summary
+    completed_tasks = set()
+    summary_file = output_base / "summary.json"
+    if summary_file.exists():
+        try:
+            with open(summary_file, "r", encoding="utf-8") as f:
+                existing_summary = json.load(f)
+            completed_tasks = set(existing_summary.get("tasks", []))
+        except Exception as e:
+            print(f"    [warn] failed to read existing summary: {e}", file=sys.stderr)
+
+    # Filter out already completed tasks
+    original_task_count = len(tasks)
+    tasks = [t for t in tasks if t.name not in completed_tasks]
+    skipped_count = original_task_count - len(tasks)
+
+    if skipped_count > 0:
+        print(f"    [info] skipped {skipped_count} already completed tasks", file=sys.stderr)
+    if not tasks:
+        print("    [info] no new tasks to run, exiting", file=sys.stderr)
+        return
+
     total_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
 
     print(f"=== Running {len(tasks)} task(s) ===", file=sys.stderr)
     print(f"    output: {output_base}", file=sys.stderr)
 
+    summary_file = output_base / "summary.json"
     for task_dir in tasks:
         result = run_task(
             task_dir=task_dir,
             output_base=output_base,
             ov_config_path=Path(args.ov_config_path),
         )
-        results.append(result)
 
-        if result["usage"]:
-            for k in total_usage:
-                total_usage[k] += result["usage"].get(k, 0)
+        # Accumulate usage
+        current_usage = result.get("usage") or {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+        }
+        for k in total_usage:
+            total_usage[k] += current_usage[k]
 
-    summary = {
-        "total_tasks": len(tasks),
-        "completed": sum(1 for r in results if r["status"] == "completed"),
-        "passed": sum(1 for r in results if (r.get("verification") or {}).get("passed", False)),
-        "errors": sum(1 for r in results if r["status"] == "error"),
-        "total_usage": total_usage,
-        "tasks": [r["task"] for r in results],
+        # Update summary after each task
+        # Load existing summary or initialize new
+        existing_summary = {
+            "total_tasks": 0,
+            "completed": 0,
+            "passed": 0,
+            "errors": 0,
+            "total_usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+            "tasks": [],
+            "pass_rate": 0.0,
+            "score": 0.0,
+        }
+        if summary_file.exists():
+            try:
+                with open(summary_file, "r", encoding="utf-8") as f:
+                    existing_summary = json.load(f)
+            except Exception as e:
+                print(
+                    f"    [warn] failed to read existing summary: {e}, creating new",
+                    file=sys.stderr,
+                )
+
+        # Calculate current task metrics
+        current_completed = 1 if result["status"] == "completed" else 0
+        current_passed = 1 if (result.get("verification") or {}).get("passed", False) else 0
+        current_error = 1 if result["status"] == "error" else 0
+        current_score = (result.get("verification") or {}).get("test_score") or 0
+
+        # Merge and save updated summary
+        updated_summary = {
+            "total_tasks": existing_summary["total_tasks"] + 1,
+            "completed": existing_summary["completed"] + current_completed,
+            "passed": existing_summary["passed"] + current_passed,
+            "errors": existing_summary["errors"] + current_error,
+            "total_usage": {
+                "input_tokens": existing_summary["total_usage"]["input_tokens"]
+                + current_usage["input_tokens"],
+                "output_tokens": existing_summary["total_usage"]["output_tokens"]
+                + current_usage["output_tokens"],
+                "total_tokens": existing_summary["total_usage"]["total_tokens"]
+                + current_usage["total_tokens"],
+            },
+            "tasks": existing_summary["tasks"] + [task_dir.name],
+        }
+        updated_summary["pass_rate"] = (
+            updated_summary["passed"] / updated_summary["total_tasks"]
+            if updated_summary["total_tasks"]
+            else 0.0
+        )
+        updated_summary["score"] = round(existing_summary["score"] + current_score, 2)
+
+        with open(summary_file, "w", encoding="utf-8") as f:
+            json.dump(updated_summary, f, indent=2, ensure_ascii=False)
+
+        # Update result.csv
+        csv_file = output_base / "result.csv"
+        csv_exists = csv_file.exists()
+        with open(csv_file, "a", encoding="utf-8", newline="") as f:
+            writer = csv.writer(f)
+            if not csv_exists:
+                # Write header
+                writer.writerow(
+                    [
+                        "taskname",
+                        "status",
+                        "input_tokens",
+                        "output_tokens",
+                        "total_tokens",
+                        "error",
+                        "verified",
+                        "passed",
+                        "test_score",
+                        "cost_time",
+                    ]
+                )
+            # Write current task row
+            verification = result.get("verification") or {}
+            writer.writerow(
+                [
+                    task_dir.name,
+                    result["status"],
+                    current_usage["input_tokens"],
+                    current_usage["output_tokens"],
+                    current_usage["total_tokens"],
+                    result.get("error", ""),
+                    str(verification.get("verified", False)),
+                    str(verification.get("passed", False)),
+                    current_score,
+                    round(result["end_time"] - result["start_time"], 2),
+                ]
+            )
+
+    # Print final summary
+    final_summary = {
+        "total_tasks": 0,
+        "completed": 0,
+        "passed": 0,
+        "errors": 0,
+        "total_usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
     }
-    summary["pass_rate"] = (
-        summary["passed"] / summary["total_tasks"] if summary["total_tasks"] else 0
-    )
-    summary["score"] = round(
-        sum(((r.get("verification") or {}).get("test_score") or 0) for r in results),
-        2,
-    )
-
-    summary_file = output_base / "summary.json"
-    with open(summary_file, "w", encoding="utf-8") as f:
-        json.dump(summary, f, indent=2, ensure_ascii=False)
+    if summary_file.exists():
+        try:
+            with open(summary_file, "r", encoding="utf-8") as f:
+                final_summary = json.load(f)
+        except Exception as e:
+            print(f"    [warn] failed to read final summary: {e}", file=sys.stderr)
 
     print(f"\n=== Summary ===", file=sys.stderr)
-    print(f"    Completed: {summary['completed']}/{summary['total_tasks']}", file=sys.stderr)
-    print(f"    Errors: {summary['errors']}", file=sys.stderr)
     print(
-        f"    Total tokens: in={total_usage['input_tokens']} out={total_usage['output_tokens']}",
+        f"    Completed: {final_summary['completed']}/{final_summary['total_tasks']}",
         file=sys.stderr,
     )
-    print(f"    Results saved to: {OUTPUT_DIR}", file=sys.stderr)
+    print(f"    Errors: {final_summary['errors']}", file=sys.stderr)
+    print(
+        f"    Total tokens: in={final_summary['total_usage']['input_tokens']} out={final_summary['total_usage']['output_tokens']}",
+        file=sys.stderr,
+    )
+    print(f"    Results saved to: {output_base}", file=sys.stderr)
 
 
 def main():
