@@ -197,15 +197,15 @@ class VikingAddResourceTool(OVFileTool):
     ) -> str:
         try:
             if path and not path.startswith("http"):
-                path = Path(path).expanduser().resolve()
-                if not path.exists():
+                local_path = Path(path).expanduser().resolve()
+                if not local_path.exists():
                     return f"Error: File not found: {path}"
-                if not path.is_file():
+                if not local_path.is_file():
                     return f"Error: Not a file: {path}"
 
             client = await self._get_client(tool_context)
             result = await client.add_resource(
-                str(path), description
+                path, description
             )
 
             if result:
