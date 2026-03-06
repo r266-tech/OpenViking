@@ -214,6 +214,7 @@ class VikingAddResourceTool(OVFileTool):
             else:
                 return "Failed to add resource"
         except Exception as e:
+            logger.exception(f"Error adding resource: {e}")
             return f"Error adding resource to Viking: {str(e)}"
 
 
