@@ -192,7 +192,7 @@ def run_list(args: argparse.Namespace) -> None:
         print(f"  {i:3d}. {task_dir.name} [{status}]", file=sys.stderr)
 
 
-def run_verification(task_dir: Path, work_dir: Path) -> dict:
+def run_verification(task_dir: Path, work_dir: Path, storage_workspace: Path) -> dict:
     """Run task verification tests. Returns verification result."""
     task_name = task_dir.name
     tests_dir = task_dir / "tests"
@@ -241,7 +241,7 @@ def run_verification(task_dir: Path, work_dir: Path) -> dict:
             if not dest.exists():
                 shutil.copy2(item, dest)
 
-    work_dir_relative = work_dir.relative_to(OPENCLAW_WORKSPACE)
+    work_dir_relative = work_dir.relative_to(storage_workspace)
     work_dir_str = str(work_dir_relative)
     tests_dir_relative = str(task_dir / "tests")
 
@@ -262,7 +262,7 @@ def run_verification(task_dir: Path, work_dir: Path) -> dict:
                         rel = Path(full_path).relative_to("/app")
                 except ValueError:
                     continue
-                src = OPENCLAW_WORKSPACE / rel
+                src = storage_workspace / rel
                 dest = work_dir / rel
                 if dest.exists():
                     continue
@@ -375,7 +375,7 @@ def run_verification(task_dir: Path, work_dir: Path) -> dict:
                 test_cmd,
                 capture_output=True,
                 text=True,
-                cwd=str(OPENCLAW_WORKSPACE),
+                cwd=str(storage_workspace),
                 env=env,
                 timeout=300,
             )
@@ -472,6 +472,7 @@ def run_task(
         if target_session_dir.exists():
             safe_rmtree(target_session_dir)
         target_session_dir.mkdir(parents=True, exist_ok=True)
+        work_dir = target_session_dir
         if task_skills_dir.exists():
             shutil.copytree(task_skills_dir, target_skills_dir, dirs_exist_ok=True)
             print(f"    [skills] copied to {target_skills_dir}", file=sys.stderr)
@@ -516,8 +517,19 @@ def run_task(
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=2400)
         if proc.returncode != 0:
             raise Exception(f"vikingbot failed: {proc.stderr}")
-        response = proc.stdout
-        usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+        # Parse JSON response
+        try:
+            bot_result = json.loads(proc.stdout.strip(), strict=False)
+            response = bot_result["text"]
+            usage = {
+                "input_tokens": bot_result["token_usage"]["prompt_tokens"],
+                "output_tokens": bot_result["token_usage"]["completion_tokens"],
+                "total_tokens": bot_result["token_usage"]["total_tokens"],
+            }
+        except json.JSONDecodeError as e:
+            raise Exception(
+                f"Failed to parse vikingbot response: {str(e)}\nRaw output: {proc.stdout}"
+            )
 
         result["status"] = "completed"
         result["response"] = response
@@ -535,7 +547,7 @@ def run_task(
         )
 
         if work_dir:
-            verification_result = run_verification(task_dir, work_dir)
+            verification_result = run_verification(task_dir, work_dir, storage_workspace)
             result["verification"] = verification_result
 
             with open(task_output_dir / "verification.json", "w", encoding="utf-8") as f:
