@@ -745,7 +745,7 @@ class FeishuChannel(BaseChannel):
                 chat_mode = await self._get_chat_mode(chat_id)
                 if chat_mode == "thread" and not message.root_id:
                     message.root_id = message.message_id
-                if message.root_id:
+                if chat_mode == "thread" and message.root_id:
                     chat_id = f"{reply_to}#{message.root_id}"
             await self._handle_message(
                 sender_id=sender_id,
