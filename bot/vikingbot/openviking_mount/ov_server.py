@@ -100,7 +100,7 @@ class VikingClient:
         return await self.client.find(query)
 
     async def add_resource(
-        self, local_path: str, desc: str, target_path: Optional[str] = None, wait: bool = False
+        self, local_path: str, desc: str
     ) -> Optional[Dict[str, Any]]:
         """添加资源到 Viking"""
         result = await self.client.add_resource(path=local_path, target=viking_resource_prefix, reason=desc, wait=False)
@@ -438,7 +438,7 @@ async def main_test():
     # res = await client.search_memory("你好", "user_1")
     # res = await client.list_resources("viking://resources/")
     # res = await client.read_content("viking://user/memories/profile.md", level="read")
-    res = await client.add_resource("/Users/bytedance/Documents/论文/吉比特年报.pdf", "吉比特年报")
+    res = await client.add_resource("https://github.com/volcengine/OpenViking", "ov代码")
     # res = await client.grep("viking://user/default/memories", "running", True)
     # res = await client.commit(
     #     session_id="99999",

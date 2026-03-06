@@ -205,7 +205,7 @@ class VikingAddResourceTool(OVFileTool):
 
             client = await self._get_client(tool_context)
             result = await client.add_resource(
-                str(path), description, target_path=target_path or None, wait=wait
+                str(path), description
             )
 
             if result:
