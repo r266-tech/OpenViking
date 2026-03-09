@@ -1,18 +1,18 @@
+import re
 from typing import Any
 
 from loguru import logger
-import re
-
-from vikingbot.config.loader import get_data_dir
-from ..base import Hook, HookContext
-from ...session import Session
 
 from vikingbot.config.loader import load_config
 from vikingbot.config.schema import SessionKey
 
+from ...session import Session
+from ..base import Hook, HookContext
+
 try:
-    from vikingbot.openviking_mount.ov_server import VikingClient
     import openviking as ov
+
+    from vikingbot.openviking_mount.ov_server import VikingClient
 
     HAS_OPENVIKING = True
 except Exception:
@@ -24,14 +24,9 @@ except Exception:
 class OpenVikingCompactHook(Hook):
     name = "openviking_compact"
 
-    def __init__(self):
-        self._client = None
-
     async def _get_client(self, workspace_id: str) -> VikingClient:
-        if not self._client:
-            client = await VikingClient.create(workspace_id)
-            self._client = client
-        return self._client
+        # Always create a new client to avoid shared state issues
+        return await VikingClient.create(workspace_id)
 
     def _filter_messages_by_sender(self, messages: list[dict], allow_from: list[str]) -> list[dict]:
         """筛选出 sender_id 在 allow_from 列表中的消息"""
@@ -57,7 +52,7 @@ class OpenVikingCompactHook(Hook):
         session_id = context.session_key.safe_name()
 
         try:
-            allow_from = self._get_channel_allow_from(session_id)
+            # allow_from = self._get_channel_allow_from(session_id)
             # filtered_messages = self._filter_messages_by_sender(
             #     vikingbot_session.messages, allow_from
             # )
@@ -82,14 +77,9 @@ class OpenVikingPostCallHook(Hook):
     name = "openviking_post_call"
     is_sync = True
 
-    def __init__(self):
-        self._client = None
-
     async def _get_client(self, workspace_id: str) -> VikingClient:
-        if not self._client:
-            client = await VikingClient.create(workspace_id)
-            self._client = client
-        return self._client
+        # Always create a new client to avoid shared state issues
+        return await VikingClient.create(workspace_id)
 
     async def _read_skill_memory(self, workspace_id: str, skill_name: str) -> str:
         ov_client = await self._get_client(workspace_id)
