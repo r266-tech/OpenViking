@@ -241,6 +241,14 @@ class DirectoryParser(BaseParser):
             return result
 
         except Exception as exc:
+            from openviking_cli.exceptions import UnsupportedDirectoryFilesError
+
+            # Re-raise UnsupportedDirectoryFilesError so the server can return
+            # a proper HTTP 422 response instead of silently returning empty results.
+            # This only fires when the caller explicitly sets strict=True.
+            if isinstance(exc, UnsupportedDirectoryFilesError):
+                raise
+
             logger.error(
                 f"[DirectoryParser] Failed to parse directory {source_path}: {exc}",
                 exc_info=True,

@@ -289,7 +289,7 @@ class AsyncHTTPClient(BaseClient):
         instruction: str = "",
         wait: bool = False,
         timeout: Optional[float] = None,
-        strict: bool = True,
+        strict: bool = False,
         ignore_dirs: Optional[str] = None,
         include: Optional[str] = None,
         exclude: Optional[str] = None,
