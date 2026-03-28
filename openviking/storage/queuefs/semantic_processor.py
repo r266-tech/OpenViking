@@ -40,6 +40,29 @@ from openviking_cli.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# Retries for lock-contended mv operations
+_MV_MAX_RETRIES = 3
+_MV_RETRY_BASE_DELAY = 0.3  # seconds
+
+
+async def _mv_with_retry(viking_fs, src: str, dst: str, ctx=None) -> None:
+    """Move a file/dir with retry on transient lock contention."""
+    for attempt in range(_MV_MAX_RETRIES):
+        try:
+            await viking_fs.mv(src, dst, ctx=ctx)
+            return
+        except Exception as e:
+            is_lock_error = "lock" in str(e).lower()
+            if is_lock_error and attempt < _MV_MAX_RETRIES - 1:
+                delay = _MV_RETRY_BASE_DELAY * (attempt + 1)
+                logger.warning(
+                    f"[SyncDiff] mv lock contention (attempt {attempt + 1}/{_MV_MAX_RETRIES}), "
+                    f"retrying in {delay}s: {src} -> {dst}"
+                )
+                await asyncio.sleep(delay)
+            else:
+                raise
+
 
 @dataclass
 class DiffResult:
@@ -611,7 +634,7 @@ class SemanticProcessor(DequeueHandlerBase):
                                 f"[SyncDiff] Failed to remove old file before update: {target_file}, error={e}"
                             )
                         try:
-                            await viking_fs.mv(root_file, target_file, ctx=ctx)
+                            await _mv_with_retry(viking_fs, root_file, target_file, ctx=ctx)
                         except Exception as e:
                             logger.error(
                                 f"[SyncDiff] Failed to move updated file: {root_file} -> {target_file}, error={e}"
@@ -622,7 +645,7 @@ class SemanticProcessor(DequeueHandlerBase):
                     diff.added_files.append(root_file)
                     target_file_uri = VikingURI(target_dir).join(name).uri
                     try:
-                        await viking_fs.mv(root_file, target_file_uri, ctx=ctx)
+                        await _mv_with_retry(viking_fs, root_file, target_file_uri, ctx=ctx)
                     except Exception as e:
                         logger.error(
                             f"[SyncDiff] Failed to move added file: {root_file} -> {target_file_uri}, error={e}"
@@ -659,7 +682,7 @@ class SemanticProcessor(DequeueHandlerBase):
                     diff.added_dirs.append(root_subdir)
                     target_subdir_uri = VikingURI(target_dir).join(name).uri
                     try:
-                        await viking_fs.mv(root_subdir, target_subdir_uri, ctx=ctx)
+                        await _mv_with_retry(viking_fs, root_subdir, target_subdir_uri, ctx=ctx)
                     except Exception as e:
                         logger.error(
                             f"[SyncDiff] Failed to move added directory: {root_subdir} -> {target_subdir_uri}, error={e}"
@@ -675,7 +698,7 @@ class SemanticProcessor(DequeueHandlerBase):
             if parent_uri:
                 await viking_fs.mkdir(parent_uri.uri, exist_ok=True, ctx=ctx)
             diff.added_dirs.append(root_uri)
-            await viking_fs.mv(root_uri, target_uri, ctx=ctx)
+            await _mv_with_retry(viking_fs, root_uri, target_uri, ctx=ctx)
             return diff
 
         await sync_dir(root_uri, target_uri)

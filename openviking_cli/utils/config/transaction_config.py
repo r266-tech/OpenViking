@@ -6,18 +6,19 @@ from pydantic import BaseModel, Field
 class TransactionConfig(BaseModel):
     """Configuration for the transaction mechanism.
 
-    By default, lock acquisition does not wait (``lock_timeout=0``): if a
-    conflicting lock is held the operation fails immediately with
-    ``LockAcquisitionError``.  Set ``lock_timeout`` to a positive value to
-    allow the caller to block and retry for up to that many seconds.
+    By default, lock acquisition waits up to ``lock_timeout`` seconds
+    (``lock_timeout=5``): if a conflicting lock is held the caller blocks
+    and retries for up to 5 seconds before raising ``LockAcquisitionError``.
+    Set ``lock_timeout=0`` to fail immediately, or increase it for
+    high-contention workloads.
     """
 
     lock_timeout: float = Field(
-        default=0.0,
+        default=5.0,
         description=(
             "Path lock acquisition timeout (seconds). "
-            "0 = fail immediately if locked (default). "
-            "> 0 = wait/retry up to this many seconds before raising LockAcquisitionError."
+            "0 = fail immediately if locked. "
+            "> 0 = wait/retry up to this many seconds before raising LockAcquisitionError (default: 5)."
         ),
     )
 

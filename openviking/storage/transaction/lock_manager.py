@@ -22,7 +22,7 @@ class LockManager:
     def __init__(
         self,
         agfs: AGFSClient,
-        lock_timeout: float = 0.0,
+        lock_timeout: float = 5.0,
         lock_expire: float = 300.0,
     ):
         self._agfs = agfs
@@ -236,7 +236,7 @@ _lock_manager: Optional[LockManager] = None
 
 def init_lock_manager(
     agfs: AGFSClient,
-    lock_timeout: float = 0.0,
+    lock_timeout: float = 5.0,
     lock_expire: float = 300.0,
 ) -> LockManager:
     global _lock_manager
