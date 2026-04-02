@@ -344,10 +344,23 @@ Commit a session by archiving messages and extracting memories.
 session = client.session(session_id="a1b2c3d4")
 session.load()
 
-# Commit archives messages and extracts memories
+# commit returns immediately with a task_id; archiving and memory
+# extraction run asynchronously in the background
 result = session.commit()
-print(f"Status: {result['status']}")
-print(f"Memories extracted: {result['memories_extracted']}")
+print(f"Status: {result['status']}")   # "accepted"
+print(f"Task ID: {result['task_id']}")
+
+# Optional: poll until the background task completes
+import time
+for _ in range(30):
+    task = client.get_task(result["task_id"])
+    if task and task["status"] == "completed":
+        print(f"Memories extracted: {task['result']['memories_extracted']}")
+        break
+    elif task and task["status"] == "failed":
+        print(f"Commit failed: {task['error']}")
+        break
+    time.sleep(1)
 ```
 
 **HTTP API**
@@ -375,10 +388,12 @@ openviking session commit a1b2c3d4
   "status": "ok",
   "result": {
     "session_id": "a1b2c3d4",
-    "status": "committed",
+    "status": "accepted",
+    "task_id": "550e8400-e29b-41d4-a716-446655440000",
+    "archive_uri": "viking://session/a1b2c3d4/history/archive_001",
     "archived": true
   },
-  "time": 0.1
+  "time": 0.05
 }
 ```
 
@@ -467,9 +482,18 @@ session.add_message("assistant", [
 # Track actually used contexts
 session.used(contexts=[results.resources[0].uri])
 
-# Commit session (archive messages, extract memories)
+# Commit session — returns immediately with task_id, extraction runs in background
 result = session.commit()
-print(f"Memories extracted: {result['memories_extracted']}")
+print(f"Task ID: {result['task_id']}")
+
+# Optional: poll until the background task completes
+import time
+for _ in range(30):
+    task = client.get_task(result["task_id"])
+    if task and task["status"] == "completed":
+        print(f"Memories extracted: {task['result']['memories_extracted']}")
+        break
+    time.sleep(1)
 
 client.close()
 ```
