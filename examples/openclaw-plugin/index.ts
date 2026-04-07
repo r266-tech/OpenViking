@@ -480,11 +480,14 @@ const contextEnginePlugin = {
             ]);
             const userResult = userSettled.status === "fulfilled" ? userSettled.value : { memories: [] };
             const agentResult = agentSettled.status === "fulfilled" ? agentSettled.value : { memories: [] };
-            // 合并两个位置的结果，去重
+            // 合并两个位置的结果，去重 (linear time via Set)
             const allMemories = [...(userResult.memories ?? []), ...(agentResult.memories ?? [])];
-            const uniqueMemories = allMemories.filter((memory, index, self) =>
-              index === self.findIndex((m) => m.uri === memory.uri)
-            );
+            const seenUris = new Set<string>();
+            const uniqueMemories = allMemories.filter((memory) => {
+              if (seenUris.has(memory.uri)) return false;
+              seenUris.add(memory.uri);
+              return true;
+            });
             const leafOnly = uniqueMemories.filter((m) => m.level === 2);
             result = {
               memories: leafOnly,
@@ -938,9 +941,12 @@ const contextEnginePlugin = {
                 }
 
                 const allMemories = [...(userResult.memories ?? []), ...(agentResult.memories ?? [])];
-                const uniqueMemories = allMemories.filter((memory, index, self) =>
-                  index === self.findIndex((m) => m.uri === memory.uri)
-                );
+                const seenUris = new Set<string>();
+                const uniqueMemories = allMemories.filter((memory) => {
+                  if (seenUris.has(memory.uri)) return false;
+                  seenUris.add(memory.uri);
+                  return true;
+                });
                 const leafOnly = uniqueMemories.filter((m) => m.level === 2);
                 const processed = postProcessMemories(leafOnly, {
                   limit: candidateLimit,
