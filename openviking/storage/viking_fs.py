@@ -59,6 +59,37 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+# Placeholder markers returned in place of a directory's L0/L1 summary when the
+# corresponding `.abstract.md` / `.overview.md` has not been generated yet. They
+# are surfaced to direct content-API callers on purpose, but must never be fed
+# back into semantic generation prompts (see `is_placeholder_abstract`).
+ABSTRACT_FILE_NOT_READY_MARKER = "[.abstract.md is not ready]"
+ABSTRACT_NOT_READY_MARKER = "[Directory abstract is not ready]"
+OVERVIEW_NOT_READY_MARKER = "[Directory overview is not ready]"
+
+# Patterns anchored to the *entire* placeholder string exactly as emitted above
+# (bare marker, or `# <uri> <marker>`, or `# <name>\n\n<marker>`). Anchoring to
+# the whole string means a real abstract that merely *mentions* one of these
+# phrases in prose is not mistaken for a not-ready placeholder.
+_ABSTRACT_PLACEHOLDER_PATTERNS = (
+    re.compile(rf"^{re.escape(ABSTRACT_FILE_NOT_READY_MARKER)}$"),
+    re.compile(rf"^# .+ {re.escape(ABSTRACT_NOT_READY_MARKER)}$"),
+    re.compile(rf"^# .+\n\n{re.escape(OVERVIEW_NOT_READY_MARKER)}$"),
+)
+
+
+def is_placeholder_abstract(text: str) -> bool:
+    """Return True only if `text` is *entirely* a not-ready placeholder.
+
+    Used to keep these placeholders out of downstream LLM prompts (e.g. parent
+    directory overview generation), where they would otherwise pollute the
+    generated — and subsequently persisted/vectorized — summaries. The match is
+    anchored to the exact emitted shapes, so a real abstract that merely
+    mentions one of these phrases in prose is not filtered out.
+    """
+    stripped = text.strip()
+    return any(pattern.match(stripped) for pattern in _ABSTRACT_PLACEHOLDER_PATTERNS)
+
 
 def _ensure_non_empty_search_query(query: str) -> None:
     if not query.strip():
@@ -934,7 +965,7 @@ class VikingFS:
                 try:
                     abstract = await self._read_abstract_for_known_dir(entry["uri"], ctx=ctx)
                 except Exception:
-                    abstract = "[.abstract.md is not ready]"
+                    abstract = ABSTRACT_FILE_NOT_READY_MARKER
 
                 results[index] = abstract
 
@@ -1073,7 +1104,7 @@ class VikingFS:
                 if mapped is not None:
                     raise mapped from exc
                 raise
-            return f"# {uri} [Directory abstract is not ready]"
+            return f"# {uri} {ABSTRACT_NOT_READY_MARKER}"
 
         return self._decode_bytes(content_bytes)
 
@@ -1159,7 +1190,7 @@ class VikingFS:
                     raise mapped from exc
                 raise
             # Fallback to default if .overview.md doesn't exist
-            return f"# {uri}\n\n[Directory overview is not ready]"
+            return f"# {uri}\n\n{OVERVIEW_NOT_READY_MARKER}"
 
         return self._decode_bytes(content_bytes)
 

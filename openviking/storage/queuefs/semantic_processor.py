@@ -35,7 +35,11 @@ from openviking.storage.queuefs.semantic_msg import SemanticMsg, build_semantic_
 from openviking.storage.queuefs.semantic_queue import is_semantic_msg_stale
 from openviking.storage.queuefs.semantic_sidecar import write_semantic_sidecars
 from openviking.storage.transaction import NO_LOCK, LockLease
-from openviking.storage.viking_fs import get_viking_fs
+from openviking.storage.viking_fs import (
+    OVERVIEW_NOT_READY_MARKER,
+    get_viking_fs,
+    is_placeholder_abstract,
+)
 from openviking.telemetry import bind_telemetry, bind_telemetry_stage, resolve_telemetry
 from openviking.telemetry.request_wait_tracker import get_request_wait_tracker
 from openviking.telemetry.span_models import create_root_span_attributes
@@ -941,6 +945,12 @@ class SemanticProcessor(DequeueHandlerBase):
 
         for child_uri in children_uris:
             abstract = await viking_fs.abstract(child_uri, ctx=ctx)
+            if is_placeholder_abstract(abstract):
+                # A child whose .abstract.md has not been generated yet has no
+                # real summary to contribute. Skip it so the not-ready
+                # placeholder never leaks into the parent overview prompt (and,
+                # transitively, into the persisted/vectorized overview).
+                continue
             dir_name = child_uri.split("/")[-1]
             results.append({"name": dir_name, "abstract": abstract})
         return results
@@ -1180,7 +1190,7 @@ class SemanticProcessor(DequeueHandlerBase):
 
         if not vlm.is_available():
             logger.warning("VLM not available, using default overview")
-            return f"# {dir_uri.split('/')[-1]}\n\n[Directory overview is not ready]"
+            return f"# {dir_uri.split('/')[-1]}\n\n{OVERVIEW_NOT_READY_MARKER}"
 
         from openviking.session.memory.utils.language import resolve_output_language
 
