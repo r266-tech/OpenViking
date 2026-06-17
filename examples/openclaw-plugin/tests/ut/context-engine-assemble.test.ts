@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { buildAutoRecallContext } from "../../auto-recall.js";
 import type { OpenVikingClient } from "../../client.js";
 import { memoryOpenVikingConfigSchema } from "../../config.js";
 import { createMemoryOpenVikingContextEngine } from "../../context-engine.js";
@@ -38,6 +39,22 @@ function makeStats() {
     activeTokens: 0,
     archiveTokens: 0,
   };
+}
+
+async function flushUntil(assertion: () => void, maxTurns = 10) {
+  let lastError: unknown;
+  for (let i = 0; i < maxTurns; i += 1) {
+    try {
+      assertion();
+      return;
+    } catch (err) {
+      lastError = err;
+      await Promise.resolve();
+    }
+  }
+  if (lastError) {
+    throw lastError;
+  }
 }
 
 function makeEngine(
@@ -366,6 +383,96 @@ describe("context-engine assemble()", () => {
     expect(getClient).not.toHaveBeenCalled();
     expect(result.messages).toBe(sourceMessages);
     expect(result.estimatedTokens).toBe(roughEstimate(sourceMessages));
+  });
+
+  it("honors configured autoRecallTimeoutMs during transformContext", async () => {
+    vi.useFakeTimers();
+    try {
+      const { engine, client, logger } = makeEngine(
+        {
+          latest_archive_overview: "unused",
+          pre_archive_abstracts: [],
+          messages: [],
+          estimatedTokens: 0,
+          stats: makeStats(),
+        },
+        {
+          cfgOverrides: {
+            autoRecall: true,
+            autoRecallTimeoutMs: 1000,
+          },
+        },
+      );
+      client.find.mockImplementationOnce(
+        () => new Promise(() => {}),
+      );
+      const sourceMessages = [
+        { role: "user", content: "debug the gateway timeout regression" },
+      ];
+
+      const assemblePromise = engine.assemble({
+        sessionId: "session-auto-recall-timeout",
+        messages: sourceMessages,
+      });
+      await flushUntil(() => {
+        expect(client.find).toHaveBeenCalledTimes(1);
+      });
+      await vi.advanceTimersByTimeAsync(999);
+      expect(logger.warn).not.toHaveBeenCalledWith(
+        expect.stringContaining("openviking: auto-recall search timeout"),
+      );
+      await vi.advanceTimersByTimeAsync(1);
+      const result = await assemblePromise;
+
+      expect(client.find).toHaveBeenCalledTimes(1);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("openviking: auto-recall search timeout"),
+      );
+      expect(result.messages).toBe(sourceMessages);
+      expect(result.estimatedTokens).toBe(roughEstimate(sourceMessages));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("falls back to legacy auto-recall timeout for malformed runtime values", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = {
+        healthCheck: vi.fn().mockResolvedValue(undefined),
+        find: vi.fn().mockImplementationOnce(() => new Promise(() => {})),
+        read: vi.fn().mockResolvedValue(""),
+      } as unknown as OpenVikingClient & {
+        find: ReturnType<typeof vi.fn>;
+      };
+      let settled = false;
+
+      const recallPromise = buildAutoRecallContext({
+        cfg: {
+          ...cfg,
+          autoRecall: true,
+          autoRecallTimeoutMs: 0,
+        },
+        client,
+        agentId: "agent:session-auto-recall-timeout-fallback",
+        queryText: "debug the gateway timeout fallback",
+        logger: makeLogger(),
+      }).finally(() => {
+        settled = true;
+      });
+      await flushUntil(() => {
+        expect(client.find).toHaveBeenCalledTimes(1);
+      });
+      await vi.advanceTimersByTimeAsync(4999);
+      expect(settled).toBe(false);
+      const rejectionExpectation = expect(recallPromise).rejects.toThrow(
+        "openviking: auto-recall search timeout",
+      );
+      await vi.advanceTimersByTimeAsync(1);
+      await rejectionExpectation;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("treats prompt-less assemble with availableTools as main assemble", async () => {

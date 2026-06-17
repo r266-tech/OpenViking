@@ -19,9 +19,16 @@ import {
 import { sanitizeUserTextForCapture } from "./text-utils.js";
 import { estimateTextTokens } from "./token-estimator.js";
 
-const AUTO_RECALL_TIMEOUT_MS = 5_000;
+const DEFAULT_AUTO_RECALL_TIMEOUT_MS = 5_000;
+const MAX_AUTO_RECALL_TIMEOUT_MS = 300_000;
 const RECALL_QUERY_MAX_CHARS = 4_000;
 export const AUTO_RECALL_SOURCE_MARKER = "Source: openviking-auto-recall";
+
+function resolveAutoRecallTimeoutMs(timeoutMs: number | undefined): number {
+  return typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0
+    ? Math.min(Math.floor(timeoutMs), MAX_AUTO_RECALL_TIMEOUT_MS)
+    : DEFAULT_AUTO_RECALL_TIMEOUT_MS;
+}
 
 type Logger = {
   info: (msg: string) => void;
@@ -512,7 +519,7 @@ export async function buildAutoRecallContext(params: {
       await recordTrace(memories.slice(0, memoryLines.length), memoryLines.length, estimatedTokens);
       return { block, memoryCount: memoryLines.length, estimatedTokens };
     })(),
-    AUTO_RECALL_TIMEOUT_MS,
+    resolveAutoRecallTimeoutMs(cfg.autoRecallTimeoutMs),
     "openviking: auto-recall search timeout",
   );
 }
