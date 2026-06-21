@@ -35,6 +35,19 @@ _DASHSCOPE_HOSTS = {
 _REASONING_MODEL_PREFIXES = ("gpt-5", "o1", "o3", "o4")
 
 
+# Default completion-token cap used when the VLM config does not set ``max_tokens``.
+# It must not exceed the completion-token limit of this backend's own default model
+# (``gpt-4o-mini`` / ``gpt-4o``, which cap completion at 16384 tokens). The previous
+# fallback of 32768 is rejected by those models with an HTTP 400 ("max_tokens is too
+# large ... supports at most 16384 completion tokens"); the memory-extraction path
+# swallows that 400 and returns 0 extracted memories with no surfaced error, so a
+# default-configured deployment silently extracts nothing (issue #2751). Memory
+# extraction emits small JSON, so 16384 introduces no real truncation while still
+# guarding against runaway generation. Callers that need a larger budget set
+# ``max_tokens`` explicitly, which is honored unchanged.
+_DEFAULT_MAX_TOKENS = 16384
+
+
 def _is_reasoning_model(model: Optional[str]) -> bool:
     """OpenAI reasoning-model families reject `max_tokens` and non-default `temperature`.
 
@@ -233,7 +246,12 @@ class OpenAIVLM(VLMBase):
         else:
             kwargs["temperature"] = self.temperature
         self._apply_provider_specific_extra_body(kwargs, effective_thinking)
-        max_tokens = self.max_tokens or 32768
+        # Fall back to the default only when max_tokens is genuinely unset (None);
+        # an explicitly configured value (including a degenerate 0) is passed through
+        # so bad config surfaces loudly instead of being silently rewritten.
+        max_tokens = (
+            self.max_tokens if self.max_tokens is not None else _DEFAULT_MAX_TOKENS
+        )
         kwargs["max_completion_tokens" if is_reasoning else "max_tokens"] = max_tokens
         if tools:
             kwargs["tools"] = tools
@@ -271,7 +289,12 @@ class OpenAIVLM(VLMBase):
         else:
             kwargs["temperature"] = self.temperature
         self._apply_provider_specific_extra_body(kwargs, effective_thinking)
-        max_tokens = self.max_tokens or 32768
+        # Fall back to the default only when max_tokens is genuinely unset (None);
+        # an explicitly configured value (including a degenerate 0) is passed through
+        # so bad config surfaces loudly instead of being silently rewritten.
+        max_tokens = (
+            self.max_tokens if self.max_tokens is not None else _DEFAULT_MAX_TOKENS
+        )
         kwargs["max_completion_tokens" if is_reasoning else "max_tokens"] = max_tokens
         if tools:
             kwargs["tools"] = tools
