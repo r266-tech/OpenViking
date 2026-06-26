@@ -902,6 +902,8 @@ Grep engine configuration for content pattern search. These settings are server-
 
 For VikingDB / Volcengine FullText grep, OpenViking writes a `content` text field for BM25 recall. The source context keeps the full content, while the vector-store write payload truncates this field to **1 MB** at the final adapter boundary to stay within backend payload limits.
 
+Legacy VikingDB collections created before the `content` FullText field was added still start normally. With `engine: "auto"`, OpenViking logs the schema mismatch and falls back to local filesystem search until the collection is recreated with the current schema.
+
 ### storage
 
 Storage configuration for context data, including file storage (RAGFS) and vector database storage (VectorDB).
