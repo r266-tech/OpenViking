@@ -1042,6 +1042,44 @@ async def test_store_skips_empty_message_content(service, monkeypatch):
     service.sessions.commit_async.assert_awaited_once()
 
 
+async def test_store_bare_string(service):
+    result = await remember(messages="User likes TypeScript")
+    assert "stored" in result.lower()
+    assert "1 message" in result
+
+
+async def test_store_content_kwarg(service):
+    result = await remember(content="User prefers light mode")
+    assert "stored" in result.lower()
+    assert "1 message" in result
+
+
+async def test_store_string_list(service):
+    result = await remember(messages=["Fact 1: uses Mac", "Fact 2: uses zsh"])
+    assert "stored" in result.lower()
+    assert "2 message" in result
+
+
+async def test_store_dict_with_text_and_role(service):
+    result = await remember(
+        messages=[
+            {"role": "user", "text": "What is my project?"},
+            {"role": "assistant", "body": "It is OpenViking."},
+        ]
+    )
+    assert "stored" in result.lower()
+    assert "2 message" in result
+
+
+async def test_store_empty_input_raises_invalid_argument(service):
+    with pytest.raises(InvalidArgumentError, match="At least one message or content"):
+        await remember(messages="")
+    with pytest.raises(InvalidArgumentError, match="At least one message or content"):
+        await remember(messages=[])
+    with pytest.raises(InvalidArgumentError, match="At least one message or content"):
+        await remember()
+
+
 # ---------------------------------------------------------------------------
 # add_resource tool
 # ---------------------------------------------------------------------------

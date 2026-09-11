@@ -773,22 +773,70 @@ async def tree(
 
 
 class StoreMessage(BaseModel):
-    role: Literal["user", "assistant"] = Field(description="Message role")
+    role: Literal["user", "assistant"] = Field(default="user", description="Message role")
     content: str = Field(description="Message text content")
 
 
+def _normalize_store_messages(
+    messages: Optional[Union[list[Union[StoreMessage, dict[str, Any], str]], str]] = None,
+    content: Optional[Union[str, list[str]]] = None,
+) -> list[StoreMessage]:
+    normalized: list[StoreMessage] = []
+
+    def _add_dict(d: dict[str, Any]) -> None:
+        text = d.get("content") or d.get("text") or d.get("body") or d.get("message") or ""
+        if not isinstance(text, str):
+            text = str(text)
+        if not text.strip():
+            return
+        raw_role = str(d.get("role", "user")).lower().strip()
+        role: Literal["user", "assistant"] = "assistant" if raw_role == "assistant" else "user"
+        normalized.append(StoreMessage(role=role, content=text.strip()))
+
+    if isinstance(messages, str):
+        if messages.strip():
+            normalized.append(StoreMessage(role="user", content=messages.strip()))
+    elif isinstance(messages, list):
+        for item in messages:
+            if isinstance(item, StoreMessage):
+                normalized.append(item)
+            elif isinstance(item, str):
+                if item.strip():
+                    normalized.append(StoreMessage(role="user", content=item.strip()))
+            elif isinstance(item, dict):
+                _add_dict(item)
+
+    if isinstance(content, str):
+        if content.strip():
+            normalized.append(StoreMessage(role="user", content=content.strip()))
+    elif isinstance(content, list):
+        for c in content:
+            if isinstance(c, str) and c.strip():
+                normalized.append(StoreMessage(role="user", content=c.strip()))
+            elif isinstance(c, dict):
+                _add_dict(c)
+
+    if not normalized:
+        raise InvalidArgumentError("At least one message or content must be provided to remember")
+    return normalized
+
+
 @mcp.tool()
-async def remember(messages: list[StoreMessage]) -> str:
+async def remember(
+    messages: Optional[Union[list[Union[StoreMessage, dict[str, Any], str]], str]] = None,
+    content: Optional[Union[str, list[str]]] = None,
+) -> str:
     """Store information into OpenViking long-term memory. Use when the user says 'remember this', shares preferences, important facts, or decisions worth persisting."""
     import uuid
 
     from openviking.message.part import TextPart
 
+    normalized_messages = _normalize_store_messages(messages=messages, content=content)
     service = get_service()
     ctx = _get_ctx()
     session_id = f"mcp-store-{uuid.uuid4().hex[:12]}"
     session = await service.sessions.get(session_id, ctx, auto_create=True)
-    for msg in messages:
+    for msg in normalized_messages:
         if msg.content:
             add_async = getattr(session, "add_message_async", None)
             if callable(add_async):
@@ -796,7 +844,7 @@ async def remember(messages: list[StoreMessage]) -> str:
             else:
                 session.add_message(msg.role, [TextPart(text=msg.content)])
     await service.sessions.commit_async(session_id, ctx)
-    return f"Stored {len(messages)} message(s) and committed for memory extraction."
+    return f"Stored {len(normalized_messages)} message(s) and committed for memory extraction."
 
 
 # -- write -----------------------------------------------------------------
