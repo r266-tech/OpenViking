@@ -944,6 +944,18 @@ async def test_list_root(service):
     assert isinstance(result, str)
 
 
+async def test_list_defaults_to_viking_root(service):
+    result = await list_tool()
+    assert isinstance(result, str)
+
+
+async def test_list_empty_string_defaults_to_viking_root(service):
+    result_empty = await list_tool("")
+    assert isinstance(result_empty, str)
+    result_spaces = await list_tool("   ")
+    assert isinstance(result_spaces, str)
+
+
 async def test_list_empty_dir(service):
     ctx = DEFAULT_CTX
     await service.viking_fs.mkdir(

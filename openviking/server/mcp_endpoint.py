@@ -640,7 +640,7 @@ async def read(
 
 @mcp.tool(name="list")
 async def ls(
-    uri: str,
+    uri: str = "viking://",
     recursive: bool = False,
     offset: int = 0,
     limit: int | None = None,
@@ -650,7 +650,7 @@ async def ls(
     """List one sorted page under a viking:// directory URI.
 
     Args:
-        uri: Directory URI to list.
+        uri: Directory URI to list (defaults to "viking://").
         recursive: Whether to recursively list descendants.
         offset: Number of visible entries to skip.
         limit: Optional maximum number of entries.
@@ -665,9 +665,10 @@ async def ls(
     if limit is not None and limit <= 0:
         raise InvalidArgumentError("limit must be greater than 0")
 
+    effective_uri = uri.strip() if isinstance(uri, str) and uri.strip() else "viking://"
     service = get_service()
     ctx = _get_ctx()
-    resolved_uri = _resolve_mcp_workspace_uri(uri, ctx)
+    resolved_uri = _resolve_mcp_workspace_uri(effective_uri, ctx)
 
     options: dict[str, Any] = {
         "ctx": ctx,
@@ -683,7 +684,7 @@ async def ls(
         options["sort_order"] = sort_order
     entries = await service.fs.ls(resolved_uri, **options)
     if not entries:
-        return f"(no entries under {uri})"
+        return f"(no entries under {effective_uri})"
 
     lines = []
     for e in entries:
