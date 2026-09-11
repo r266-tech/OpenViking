@@ -140,6 +140,18 @@ def test_resolve_mcp_workspace_uri_supports_dotted_current_user_id():
     )
 
 
+def test_resolve_mcp_workspace_uri_trims_whitespace():
+    ctx = RequestContext(DEFAULT_CTX.user, Role.USER)
+    assert (
+        _resolve_mcp_workspace_uri("  viking://resources/notes.md  ", ctx)
+        == "viking://resources/notes.md"
+    )
+    assert (
+        _resolve_mcp_workspace_uri("\n viking://~/resources \t", ctx)
+        == "viking://user/test_user/resources"
+    )
+
+
 # ---------------------------------------------------------------------------
 # health tool
 # ---------------------------------------------------------------------------
@@ -1643,6 +1655,18 @@ async def test_edit_memory_file_preserves_metadata(service):
     assert "coffee" in raw_after
     visible = await service.fs.read_visible(uri, ctx=DEFAULT_CTX)
     assert visible.strip() == "likes: coffee"
+
+
+async def test_edit_crlf_mismatch_provides_helpful_hint(service):
+    uri_crlf = "viking://resources/test_edit_crlf.md"
+    await write(uri=uri_crlf, content="line 1\r\nline 2\r\n")
+    with pytest.raises(InvalidArgumentError, match="detected CRLF in file vs LF"):
+        await edit(uri=uri_crlf, old_string="line 1\nline 2\n", new_string="line 1\nchanged\n")
+
+    uri_lf = "viking://resources/test_edit_lf.md"
+    await write(uri=uri_lf, content="line 1\nline 2\n")
+    with pytest.raises(InvalidArgumentError, match="detected LF in file vs CRLF"):
+        await edit(uri=uri_lf, old_string="line 1\r\nline 2\r\n", new_string="line 1\nchanged\n")
 
 
 @pytest.mark.parametrize("role", [Role.USER, Role.ADMIN, Role.ROOT])

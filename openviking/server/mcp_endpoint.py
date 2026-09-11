@@ -104,7 +104,7 @@ def _get_ctx() -> RequestContext:
 
 def _resolve_mcp_workspace_uri(uri: str, ctx: RequestContext) -> str:
     """Resolve MCP workspace URIs, expanding the viking://~ home alias, at its boundary."""
-    return validate_request_viking_uri(resolve_path_variables(uri), ctx)
+    return validate_request_viking_uri(resolve_path_variables(uri.strip()), ctx)
 
 
 def _scope_to_origin(scope: Scope) -> Optional[str]:
@@ -916,8 +916,15 @@ async def edit(
         raise NotFoundError(uri, "file") from exc
     occurrences = current.count(old_string)
     if occurrences == 0:
+        hint = ""
+        if "\r\n" in current and "\r\n" not in old_string and "\n" in old_string:
+            if current.count(old_string.replace("\n", "\r\n")) > 0:
+                hint = " (detected CRLF in file vs LF in old_string; normalize line endings)"
+        elif "\r\n" not in current and "\r\n" in old_string:
+            if current.count(old_string.replace("\r\n", "\n")) > 0:
+                hint = " (detected LF in file vs CRLF in old_string; normalize line endings)"
         raise InvalidArgumentError(
-            f"old_string not found in {uri}. "
+            f"old_string not found in {uri}.{hint} "
             "Re-read the file with the read tool to get its current content."
         )
     if occurrences > 1 and not replace_all:
