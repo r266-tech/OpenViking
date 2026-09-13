@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import base64
 import contextvars
+import json
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -104,7 +105,7 @@ def _get_ctx() -> RequestContext:
 
 def _resolve_mcp_workspace_uri(uri: str, ctx: RequestContext) -> str:
     """Resolve MCP workspace URIs, expanding the viking://~ home alias, at its boundary."""
-    return validate_request_viking_uri(resolve_path_variables(uri.strip()), ctx)
+    return validate_request_viking_uri(resolve_path_variables(uri), ctx)
 
 
 def _scope_to_origin(scope: Scope) -> Optional[str]:
@@ -778,53 +779,60 @@ class StoreMessage(BaseModel):
 
 
 def _normalize_store_messages(
-    messages: Optional[Union[list[Union[StoreMessage, dict[str, Any], str]], str]] = None,
-    content: Optional[Union[str, list[str]]] = None,
+    messages: Optional[
+        Union[list[Union[StoreMessage, dict[str, Any], str]], dict[str, Any], str]
+    ] = None,
+    content: Optional[Union[str, list[Union[str, dict[str, Any]]], dict[str, Any]]] = None,
 ) -> list[StoreMessage]:
-    normalized: list[StoreMessage] = []
+    raw_items: list[Any] = []
 
-    def _add_dict(d: dict[str, Any]) -> None:
-        text = d.get("content") or d.get("text") or d.get("body") or d.get("message") or ""
-        if not isinstance(text, str):
-            text = str(text)
-        if not text.strip():
+    def _collect(val: Any) -> None:
+        if val is None:
             return
-        raw_role = str(d.get("role", "user")).lower().strip()
-        role: Literal["user", "assistant"] = "assistant" if raw_role == "assistant" else "user"
-        normalized.append(StoreMessage(role=role, content=text.strip()))
+        if isinstance(val, list):
+            raw_items.extend(val)
+        else:
+            raw_items.append(val)
 
-    if isinstance(messages, str):
-        if messages.strip():
-            normalized.append(StoreMessage(role="user", content=messages.strip()))
-    elif isinstance(messages, list):
-        for item in messages:
-            if isinstance(item, StoreMessage):
-                normalized.append(item)
-            elif isinstance(item, str):
-                if item.strip():
-                    normalized.append(StoreMessage(role="user", content=item.strip()))
-            elif isinstance(item, dict):
-                _add_dict(item)
+    _collect(messages)
+    _collect(content)
 
-    if isinstance(content, str):
-        if content.strip():
-            normalized.append(StoreMessage(role="user", content=content.strip()))
-    elif isinstance(content, list):
-        for c in content:
-            if isinstance(c, str) and c.strip():
-                normalized.append(StoreMessage(role="user", content=c.strip()))
-            elif isinstance(c, dict):
-                _add_dict(c)
+    normalized: list[StoreMessage] = []
+    for item in raw_items:
+        if isinstance(item, StoreMessage):
+            normalized.append(item)
+        elif isinstance(item, str):
+            if item.strip():
+                normalized.append(StoreMessage(role="user", content=item.strip()))
+        elif isinstance(item, dict):
+            text = (
+                item.get("content") or item.get("text") or item.get("body") or item.get("message")
+            )
+            if text is None:
+                text = json.dumps(item, ensure_ascii=False)
+            elif not isinstance(text, str):
+                text = str(text)
 
-    if not normalized:
-        raise InvalidArgumentError("At least one message or content must be provided to remember")
+            if not text.strip():
+                continue
+
+            raw_role = str(item.get("role", "user")).lower().strip()
+            role: Literal["user", "assistant"] = "assistant" if raw_role == "assistant" else "user"
+            normalized.append(StoreMessage(role=role, content=text.strip()))
+
+    if not normalized or not any(msg.content.strip() for msg in normalized):
+        raise InvalidArgumentError(
+            "At least one message with non-empty content must be provided to remember"
+        )
     return normalized
 
 
 @mcp.tool()
 async def remember(
-    messages: Optional[Union[list[Union[StoreMessage, dict[str, Any], str]], str]] = None,
-    content: Optional[Union[str, list[str]]] = None,
+    messages: Optional[
+        Union[list[Union[StoreMessage, dict[str, Any], str]], dict[str, Any], str]
+    ] = None,
+    content: Optional[Union[str, list[Union[str, dict[str, Any]]], dict[str, Any]]] = None,
 ) -> str:
     """Store information into OpenViking long-term memory. Use when the user says 'remember this', shares preferences, important facts, or decisions worth persisting."""
     import uuid
@@ -837,7 +845,7 @@ async def remember(
     session_id = f"mcp-store-{uuid.uuid4().hex[:12]}"
     session = await service.sessions.get(session_id, ctx, auto_create=True)
     for msg in normalized_messages:
-        if msg.content:
+        if msg.content.strip():
             add_async = getattr(session, "add_message_async", None)
             if callable(add_async):
                 await add_async(msg.role, [TextPart(text=msg.content)])
@@ -917,12 +925,8 @@ async def edit(
     occurrences = current.count(old_string)
     if occurrences == 0:
         hint = ""
-        if "\r\n" in current and "\r\n" not in old_string and "\n" in old_string:
-            if current.count(old_string.replace("\n", "\r\n")) > 0:
-                hint = " (detected CRLF in file vs LF in old_string; normalize line endings)"
-        elif "\r\n" not in current and "\r\n" in old_string:
-            if current.count(old_string.replace("\r\n", "\n")) > 0:
-                hint = " (detected LF in file vs CRLF in old_string; normalize line endings)"
+        if current.replace("\r\n", "\n").count(old_string.replace("\r\n", "\n")) > 0:
+            hint = " (detected CRLF/LF line ending mismatch between old_string and file content; normalize line endings)"
         raise InvalidArgumentError(
             f"old_string not found in {uri}.{hint} "
             "Re-read the file with the read tool to get its current content."
