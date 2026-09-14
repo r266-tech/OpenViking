@@ -782,7 +782,7 @@ def _normalize_store_messages(
     messages: Optional[
         Union[list[Union[StoreMessage, dict[str, Any], str]], dict[str, Any], str]
     ] = None,
-    content: Optional[Union[str, list[Union[str, dict[str, Any]]], dict[str, Any]]] = None,
+    content: Optional[Union[str, list[str]]] = None,
 ) -> list[StoreMessage]:
     raw_items: list[Any] = []
 
@@ -805,19 +805,36 @@ def _normalize_store_messages(
             if item.strip():
                 normalized.append(StoreMessage(role="user", content=item.strip()))
         elif isinstance(item, dict):
-            text = (
-                item.get("content") or item.get("text") or item.get("body") or item.get("message")
-            )
+            raw_role = item.get("role")
+            if raw_role is not None:
+                cleaned_role = str(raw_role).lower().strip()
+                if cleaned_role not in ("user", "assistant"):
+                    raise InvalidArgumentError(
+                        f"Invalid message role '{raw_role}'. Must be 'user' or 'assistant'"
+                    )
+                role: Literal["user", "assistant"] = cleaned_role  # type: ignore
+            else:
+                role = "user"
+
+            text: Optional[str] = None
+            for key in ("content", "text", "body", "message"):
+                if key in item:
+                    val = item[key]
+                    if isinstance(val, (dict, list)):
+                        text = json.dumps(val, ensure_ascii=False)
+                    else:
+                        text = str(val) if val is not None else ""
+                    break
+
             if text is None:
+                keys_without_role = [k for k in item if k != "role"]
+                if not keys_without_role:
+                    continue
                 text = json.dumps(item, ensure_ascii=False)
-            elif not isinstance(text, str):
-                text = str(text)
 
             if not text.strip():
                 continue
 
-            raw_role = str(item.get("role", "user")).lower().strip()
-            role: Literal["user", "assistant"] = "assistant" if raw_role == "assistant" else "user"
             normalized.append(StoreMessage(role=role, content=text.strip()))
 
     if not normalized or not any(msg.content.strip() for msg in normalized):
@@ -832,7 +849,7 @@ async def remember(
     messages: Optional[
         Union[list[Union[StoreMessage, dict[str, Any], str]], dict[str, Any], str]
     ] = None,
-    content: Optional[Union[str, list[Union[str, dict[str, Any]]], dict[str, Any]]] = None,
+    content: Optional[Union[str, list[str]]] = None,
 ) -> str:
     """Store information into OpenViking long-term memory. Use when the user says 'remember this', shares preferences, important facts, or decisions worth persisting."""
     import uuid

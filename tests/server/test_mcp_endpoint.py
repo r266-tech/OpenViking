@@ -1059,6 +1059,9 @@ async def test_store_skips_empty_message_content(service, monkeypatch):
 async def test_store_bare_string(service, monkeypatch):
     fake_session = AsyncMock()
     fake_session.messages = []
+    fake_session.add_message_async = AsyncMock(
+        side_effect=lambda role, parts, **kw: fake_session.messages.append((role, parts[0].text))
+    )
     fake_session.add_message = lambda role, parts, **kw: fake_session.messages.append(
         (role, parts[0].text)
     )
@@ -1075,6 +1078,9 @@ async def test_store_bare_string(service, monkeypatch):
 async def test_store_content_kwarg(service, monkeypatch):
     fake_session = AsyncMock()
     fake_session.messages = []
+    fake_session.add_message_async = AsyncMock(
+        side_effect=lambda role, parts, **kw: fake_session.messages.append((role, parts[0].text))
+    )
     fake_session.add_message = lambda role, parts, **kw: fake_session.messages.append(
         (role, parts[0].text)
     )
@@ -1091,6 +1097,9 @@ async def test_store_content_kwarg(service, monkeypatch):
 async def test_store_string_list(service, monkeypatch):
     fake_session = AsyncMock()
     fake_session.messages = []
+    fake_session.add_message_async = AsyncMock(
+        side_effect=lambda role, parts, **kw: fake_session.messages.append((role, parts[0].text))
+    )
     fake_session.add_message = lambda role, parts, **kw: fake_session.messages.append(
         (role, parts[0].text)
     )
@@ -1110,6 +1119,9 @@ async def test_store_string_list(service, monkeypatch):
 async def test_store_dict_with_text_and_role(service, monkeypatch):
     fake_session = AsyncMock()
     fake_session.messages = []
+    fake_session.add_message_async = AsyncMock(
+        side_effect=lambda role, parts, **kw: fake_session.messages.append((role, parts[0].text))
+    )
     fake_session.add_message = lambda role, parts, **kw: fake_session.messages.append(
         (role, parts[0].text)
     )
@@ -1129,6 +1141,17 @@ async def test_store_dict_with_text_and_role(service, monkeypatch):
         ("assistant", "It is OpenViking."),
     ]
     service.sessions.commit_async.assert_awaited_once()
+
+
+async def test_store_dict_invalid_role_raises_invalid_argument(service, monkeypatch):
+    commit_mock = AsyncMock()
+    monkeypatch.setattr(service.sessions, "commit_async", commit_mock)
+
+    for invalid_role in ["system", "admin", "unknown"]:
+        with pytest.raises(InvalidArgumentError, match="Invalid message role"):
+            await remember(messages=[{"role": invalid_role, "content": "hello"}])
+
+    commit_mock.assert_not_awaited()
 
 
 async def test_store_via_mcp_call_tool_json_object(service, monkeypatch):
@@ -1159,8 +1182,14 @@ async def test_store_empty_input_raises_invalid_argument(service, monkeypatch):
         {"messages": []},
         {"messages": "   "},
         {"messages": [{"content": ""}]},
+        {"messages": [{"content": "   "}]},
+        {"messages": [{"text": ""}]},
+        {"messages": [{}]},
+        {"messages": [{"role": "user"}]},
         {"messages": [{"role": "user", "content": "   "}]},
         {},
+        {"content": ""},
+        {"content": "   "},
     ]:
         with pytest.raises(InvalidArgumentError, match="non-empty content"):
             await remember(**empty_args)
