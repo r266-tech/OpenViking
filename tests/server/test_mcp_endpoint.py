@@ -289,6 +289,31 @@ def test_portable_schema_inlines_refs():
     }
 
 
+async def test_remember_schema_advertises_stable_portable_contract():
+    tools = await mcp_endpoint.mcp.list_tools()
+    schema = next(tool.inputSchema for tool in tools if tool.name == "remember")
+
+    assert schema["type"] == "object"
+    assert set(schema["properties"]) == {"messages", "content"}
+    assert schema["properties"]["messages"]["type"] == "array"
+    item_schema = schema["properties"]["messages"]["items"]
+    assert item_schema["required"] == ["content"]
+    assert item_schema["properties"]["role"]["enum"] == ["user", "assistant"]
+    assert schema["properties"]["content"]["type"] == "string"
+
+    def assert_portable(node):
+        assert "anyOf" not in node
+        assert "$ref" not in node
+        assert "$defs" not in node
+        assert "type" in node
+        for child in node.get("properties", {}).values():
+            assert_portable(child)
+        if isinstance(node.get("items"), dict):
+            assert_portable(node["items"])
+
+    assert_portable(schema)
+
+
 async def test_find_tool_calls_lightweight_find(service, monkeypatch):
     captured = {}
 

@@ -1525,6 +1525,39 @@ async def health() -> str:
 
 _PORTABLE_TYPE_PREFERENCE = ("array", "object", "string", "number", "integer", "boolean")
 
+# ``remember`` accepts a few compatibility aliases at runtime (a bare string,
+# a single object, or ``content`` as a list).  Those aliases are useful for
+# older callers but cannot all be represented by the portable schema used by
+# strict MCP clients.  Advertise one stable object contract and keep the
+# compatibility parsing in ``_normalize_store_messages``.
+_REMEMBER_PORTABLE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "messages": {
+            "type": "array",
+            "description": "Messages to store; each item must contain non-empty content.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "role": {
+                        "type": "string",
+                        "enum": ["user", "assistant"],
+                        "default": "user",
+                    },
+                    "content": {"type": "string"},
+                },
+                "required": ["content"],
+                "additionalProperties": False,
+            },
+        },
+        "content": {
+            "type": "string",
+            "description": "Single user fact; use messages for multiple entries.",
+        },
+    },
+    "additionalProperties": False,
+}
+
 
 def _portable_schema(schema: Any, defs: Optional[Dict[str, Any]] = None) -> Any:
     if not isinstance(schema, dict):
@@ -1589,7 +1622,10 @@ def _portable_schema(schema: Any, defs: Optional[Dict[str, Any]] = None) -> Any:
 
 def _apply_portable_schemas() -> None:
     for tool in mcp._tool_manager.list_tools():
-        tool.parameters = _portable_schema(tool.parameters)
+        if tool.name == "remember":
+            tool.parameters = _REMEMBER_PORTABLE_SCHEMA
+        else:
+            tool.parameters = _portable_schema(tool.parameters)
 
 
 _apply_portable_schemas()
