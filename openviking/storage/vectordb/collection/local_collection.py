@@ -26,6 +26,7 @@ from openviking.storage.vectordb.index.index import IIndex
 from openviking.storage.vectordb.index.local_index import PersistentIndex, VolatileIndex
 from openviking.storage.vectordb.meta.collection_meta import CollectionMeta, create_collection_meta
 from openviking.storage.vectordb.meta.index_meta import create_index_meta
+from openviking.storage.vectordb.store.bytes_row import STRING_MAX_UINT16_LENGTH
 from openviking.storage.vectordb.store.data import CandidateData, DeltaRecord
 from openviking.storage.vectordb.store.store import OpType
 from openviking.storage.vectordb.store.store_manager import StoreManager, create_store_manager
@@ -846,7 +847,7 @@ class LocalCollection(ICollection):
                 if sparse_dict and isinstance(sparse_dict, dict):
                     cands_list[i].sparse_raw_terms = list(sparse_dict.keys())
                     cands_list[i].sparse_values = list(sparse_dict.values())
-            cands_list[i].fields = safe_json_dumps(data, ensure_ascii=False)
+            cands_list[i].fields = self._serialize_fields(data)
             cands_list[i].expire_ns_ts = time.time_ns() + ttl * 1000000000 if ttl > 0 else 0
 
         if not self.store_mgr:
@@ -871,6 +872,33 @@ class LocalCollection(ICollection):
 
         result.ids = primary_keys
         return result
+
+    def _serialize_fields(self, data: Dict[str, Any]) -> str:
+        """Fit the derived abstract to the complete scalar JSON storage budget."""
+        serialized = safe_json_dumps(data, ensure_ascii=False)
+        if len(serialized.encode("utf-8")) <= STRING_MAX_UINT16_LENGTH:
+            return serialized
+
+        abstract = data.get("abstract")
+        if not isinstance(abstract, str) or self.meta.primary_key == "abstract":
+            raise ValueError(f"Vector record metadata exceeds {STRING_MAX_UINT16_LENGTH} bytes")
+        fields = {**data, "abstract": ""}
+        serialized = safe_json_dumps(fields, ensure_ascii=False)
+        if len(serialized.encode("utf-8")) > STRING_MAX_UINT16_LENGTH:
+            # Identity, ownership, URIs and other metadata must never be shortened.
+            raise ValueError(f"Vector record metadata exceeds {STRING_MAX_UINT16_LENGTH} bytes")
+
+        low, high = 0, len(abstract)
+        while low < high:
+            middle = (low + high + 1) // 2
+            fields["abstract"] = abstract[:middle]
+            candidate = safe_json_dumps(fields, ensure_ascii=False)
+            if len(candidate.encode("utf-8")) <= STRING_MAX_UINT16_LENGTH:
+                low = middle
+                serialized = candidate
+            else:
+                high = middle - 1
+        return serialized
 
     def fetch_data(self, primary_keys: List[Any]) -> FetchDataInCollectionResult:
         result = FetchDataInCollectionResult()
