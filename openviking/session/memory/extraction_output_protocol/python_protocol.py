@@ -79,7 +79,7 @@ _CONTRACT_PREAMBLE = (
     "and, when links are enabled, obj.link(target, link_type='related_to', weight=0.5, match_text=None, description='').",
     "To change an existing string field, edit it through the object's field attribute. Use the "
     "real field name (e.g. content), NOT the literal word 'field':",
-    '  - obj.content.update("""complete new value"""): replace the whole field with one positional string (not new_value=...).',
+    "  - obj.content.update(new_value): replace the whole field with a complete new string.",
     "  - obj.content.edit(search=..., replace=...): replace one exact snippet in place.",
     "  - obj.content.drop(text=...): delete one exact snippet in place.",
     "edit()/drop() may be chained, e.g. obj.content.edit(search='a', replace='b').drop(text='c'); do not mix them with .update() in one chain.",
@@ -93,7 +93,7 @@ _CONTRACT_PREAMBLE = (
     'single- or double-quoted literals. Inside triple quotes, escape any literal """ and '
     "backslash; never put a real newline inside a single- or double-quoted string.",
     "Only keyword arguments are accepted by create, set, and obj.update(); a field's update() takes one positional string. Unknown business fields are ignored.",
-    "You may end the program with sdk.commit(); when present it must be the final call. Return an empty program when there are no changes.",
+    "You may end the program with sdk.commit(); when present it must be the final call. If there are no changes, return only sdk.commit().",
     "Use the system-provided existing-object variable names exactly as shown. When a newly "
     "created memory must be referenced by delete(replacement=...) or link(...), assign the "
     "create call to a variable first, for example: canonical = sdk.create_<type>(...); "
@@ -289,7 +289,7 @@ class PythonExtractionOutputProtocol(ExtractionOutputProtocol):
         return (
             "You have reached the maximum number of tool call iterations. Do not call any more "
             "tools. Return the complete restricted Python memory SDK program now. Output only "
-            "Python code. If there are no changes, return an empty program."
+            "Python code. If there are no changes, return only sdk.commit()."
         )
 
     def render_format_retry(self, error: str | None = None) -> str:
@@ -297,19 +297,12 @@ class PythonExtractionOutputProtocol(ExtractionOutputProtocol):
         tool_guidance = ""
         binding_guidance = ""
         quote_guidance = ""
-        update_guidance = ""
         if error and "sdk.existing() is reserved" in error:
             binding_guidance = (
                 " Use the existing-object variable names already supplied by the system; do not "
                 "emit sdk.existing(). If a new object is the replacement, assign its create call "
                 "first, for example `canonical = sdk.create_<type>(...)`, then call "
                 "`duplicate_1.delete(replacement=canonical)`."
-            )
-        if error and "field.update() takes exactly one positional argument" in error:
-            update_guidance = (
-                " Replace obj.content.update(new_value=...) with "
-                'obj.content.update("""complete new value"""); use the real field name. '
-                "Only obj.update(field=value, ...) takes named fields."
             )
         if error and _is_string_literal_syntax_error(error):
             quote_guidance = (
@@ -327,7 +320,7 @@ class PythonExtractionOutputProtocol(ExtractionOutputProtocol):
             )
         return (
             "Your previous output was not a valid restricted Python memory SDK program."
-            f"{detail}{tool_guidance}{binding_guidance}{quote_guidance}{update_guidance} Regenerate the complete "
+            f"{detail}{tool_guidance}{binding_guidance}{quote_guidance} Regenerate the complete "
             "program and output no explanation. "
             "Put Markdown memory content inside quoted SDK arguments, using triple-quoted strings "
             '("""...""") for any multi-line or Markdown text so newlines and quotes stay inside '

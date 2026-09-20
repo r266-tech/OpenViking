@@ -191,6 +191,87 @@ def test_python_contract_includes_link_rules_when_enabled():
     assert "assign the create/set call to a variable first" in contract
 
 
+@pytest.mark.parametrize("language", ["en", "zh-CN"])
+@pytest.mark.parametrize(
+    ("memory_type", "field_name"),
+    [("preferences", "topic"), ("entities", "category"), ("events", "event_name")],
+)
+def test_python_contract_renders_builtin_field_descriptions_like_json(
+    language, memory_type, field_name
+):
+    registry = MemoryTypeRegistry(load_schemas=False)
+    registry.load_from_yaml(str(resolve_memory_templates_dir() / f"{memory_type}.yaml"))
+    schema = registry.get(memory_type)
+    original = next(field.description for field in schema.fields if field.name == field_name)
+    assert "{{ language }}" in original
+    context = _context([schema], template_context={"language": language})
+
+    python_contract = create_extraction_output_protocol("python").render_contract(context)
+    json_contract = create_extraction_output_protocol("json").render_contract(context)
+    json_schema = json.loads(json_contract.split("```json\n", 1)[1].split("```", 1)[0])
+    model_ref = json_schema["properties"][memory_type]["items"]["$ref"].rsplit("/", 1)[1]
+    rendered = json_schema["$defs"][model_ref]["properties"][field_name]["description"]
+
+    assert " ".join(rendered.split()) in python_contract
+    assert language in rendered
+    assert "{{ language }}" not in python_contract
+    assert "{% if language" not in python_contract
+    assert ("Use lowercase with underscores" in rendered) == (language == "en")
+    assert (
+        next(field.description for field in schema.fields if field.name == field_name) == original
+    )
+
+
+def test_python_field_description_keeps_dsl_patch_instructions():
+    schema = _preference_schema()
+    schema.fields[1].description = "Write content in {{ language.upper() }}."
+    context = _context([schema], template_context={"language": "en"})
+
+    contract = create_extraction_output_protocol("python").render_contract(context)
+
+    assert "content [editable string: obj.field.edit/drop/update]: Write content in EN." in contract
+    assert "obj.content.edit(search=..., replace=...)" in contract
+    assert "PATCH operation for" not in contract
+    assert "Use a DELETE block" not in contract
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("language", ["en", "zh-CN"])
+async def test_default_python_extract_loop_passes_language_to_field_descriptions(language):
+    schema = _preference_schema()
+    schema.description = "Preferences in {{ language }}."
+    schema.fields[1].description = "Write content in {{ language }}."
+    provider = MagicMock()
+    provider.get_memory_schemas.return_value = [schema]
+    provider.get_output_language.return_value = language
+    provider.get_tools.return_value = []
+    provider.get_extract_context.return_value = SimpleNamespace(page_id_map=PageIdMap())
+    provider.read_file_contents = {}
+    provider.instruction.return_value = "Extract memory operations."
+    provider.prefetch = AsyncMock(return_value=[])
+    vlm = SimpleNamespace(
+        model="test-model", get_completion_async=AsyncMock(return_value="sdk.commit()")
+    )
+    loop = ExtractLoop(vlm=vlm, viking_fs=MagicMock(), context_provider=provider, max_iterations=1)
+    empty = ResolvedOperations(upsert_operations=[], delete_file_contents=[], errors=[])
+    loop.resolve_operations = AsyncMock(return_value=(empty, []))
+    loop._check_unread_existing_files = AsyncMock(return_value={})
+    # Exercise the default protocol selection rather than explicitly choosing Python.
+    config = SimpleNamespace(memory=SimpleNamespace(link_enabled=False))
+    with (
+        patch("openviking.session.memory.extract_loop.get_openviking_config", return_value=config),
+        patch("openviking_cli.utils.config.get_openviking_config", return_value=config),
+    ):
+        operations, _ = await loop.run()
+
+    assert operations is empty
+    prompt = vlm.get_completion_async.call_args.kwargs["messages"][0]["content"]
+    assert "restricted Python memory SDK" in prompt
+    assert f"Preferences in {language}." in prompt
+    assert f"Write content in {language}." in prompt
+    assert "{{ language }}" not in prompt
+
+
 def test_python_contract_omits_link_rules_when_disabled():
     context = _context([_preference_schema()], link_enabled=False)
     protocol = create_extraction_output_protocol("python")
@@ -445,23 +526,6 @@ def test_python_contract_uses_set_for_single_file_schema_and_create_for_collecti
     assert "Current self identity: exactly one sdk.set_profile() call without peer_id" in contract
 
 
-def test_python_field_update_retry_provides_a_valid_positional_example():
-    context = _context([_preference_schema()])
-    protocol = create_extraction_output_protocol("python")
-    header = 'obj = sdk.create_preferences(topic="editor", content="old", score=0)\n'
-    operations, error = protocol.parse(header + 'obj.content.update(new_value="new")', context)
-
-    assert operations is None
-    assert "field.update() takes exactly one positional argument" in error
-    example = 'obj.content.update("""complete new value""")'
-    assert example in protocol.render_contract(context)
-    assert example in protocol.render_format_retry(error)
-
-    operations, error = protocol.parse(header + example, context)
-    assert error is None
-    assert operations.preferences[0].content == "complete new value"
-
-
 def test_python_reserved_existing_retry_explains_new_replacement_binding():
     protocol = create_extraction_output_protocol("python")
 
@@ -477,7 +541,9 @@ def test_python_reserved_existing_retry_explains_new_replacement_binding():
 def test_python_string_literal_retry_pushes_triple_quotes():
     protocol = create_extraction_output_protocol("python")
 
-    retry = protocol.render_format_retry("Line 33: invalid syntax. Perhaps you forgot a comma?")
+    retry = protocol.render_format_retry(
+        "Line 33: invalid syntax. Perhaps you forgot a comma?"
+    )
 
     assert "offending line is shown above" in retry
     assert 'triple-quoted string ("""...""")' in retry
@@ -661,7 +727,7 @@ def test_python_syntax_error_includes_offending_source_line():
 
     assert error is not None
     assert "invalid Python syntax" in error
-    assert "Little Women" in error
+    assert 'Little Women' in error
     assert "^" in error
 
 
@@ -1617,7 +1683,7 @@ def test_python_rejects_fstring_width_format_spec():
     # A width format spec turns a small integer literal into a huge padded string
     # with no repeat operator; format specs are disallowed.
     operations, error = protocol.parse(
-        "sdk.set_profile(content=f\"{'x':>1000001}\")\nsdk.commit()",
+        'sdk.set_profile(content=f"{\'x\':>1000001}")\nsdk.commit()',
         context,
     )
 

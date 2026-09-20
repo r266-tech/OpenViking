@@ -506,7 +506,7 @@ class TestExtractLoopFinalJsonRetry:
         assert "not inferring scope from the file name/topic" in initial_system_prompt
 
     @pytest.mark.asyncio
-    async def test_python_protocol_retries_then_raises_on_invalid_program(self):
+    async def test_python_protocol_retries_then_raises_on_empty_response(self):
         class FakeVLM:
             model = "test-model"
 
@@ -515,7 +515,7 @@ class TestExtractLoopFinalJsonRetry:
 
             async def get_completion_async(self, **kwargs):
                 self.seen_messages.append(list(kwargs["messages"]))
-                return "this is not a valid SDK program"
+                return ""
 
         class FakeContextProvider:
             read_file_contents = {}
@@ -573,7 +573,7 @@ class TestExtractLoopFinalJsonRetry:
             extract_loop._validate_patch_operations = AsyncMock(return_value=[])
             extract_loop.finalize_operations = AsyncMock()
 
-            with pytest.raises(RuntimeError, match="failure_kind=parse_error"):
+            with pytest.raises(RuntimeError, match="failure_kind=empty_response"):
                 await extract_loop.run()
 
         extract_loop.finalize_operations.assert_not_awaited()
