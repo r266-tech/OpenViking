@@ -4,16 +4,26 @@
 
 import json
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from openviking.session.memory.dataclass import MemoryField, MemoryFile, MemoryTypeSchema
+from openviking.session.memory.dataclass import (
+    MemoryField,
+    MemoryFile,
+    MemoryTypeSchema,
+    ResolvedOperations,
+)
+from openviking.session.memory.extract_loop import ExtractLoop
 from openviking.session.memory.extraction_output_protocol import (
     ExtractionOutputContext,
     create_extraction_output_protocol,
 )
 from openviking.session.memory.memory_isolation_handler import RoleScope
+from openviking.session.memory.memory_type_registry import (
+    MemoryTypeRegistry,
+    resolve_memory_templates_dir,
+)
 from openviking.session.memory.merge_op import FieldType, MergeOp
 from openviking.session.memory.page_id_map import PageIdMap
 from openviking.session.memory.schema_model_generator import SchemaModelGenerator
@@ -90,12 +100,13 @@ def _context(
     link_enabled: bool = False,
     role_scope: RoleScope | None = None,
     available_tools: tuple[str, ...] = ("read",),
+    template_context: dict[str, str] | None = None,
 ) -> ExtractionOutputContext:
     config = SimpleNamespace(memory=SimpleNamespace(link_enabled=link_enabled))
     with patch("openviking_cli.utils.config.get_openviking_config", return_value=config):
-        operations_model = SchemaModelGenerator(schemas).create_structured_operations_model(
-            role_scope
-        )
+        operations_model = SchemaModelGenerator(
+            schemas, template_context=template_context
+        ).create_structured_operations_model(role_scope)
     page_id_map = PageIdMap()
     read_file_contents = {}
     for memory_file in files or []:
@@ -109,6 +120,7 @@ def _context(
         link_enabled=link_enabled,
         role_scope=role_scope,
         available_tools=available_tools,
+        template_context=dict(template_context or {}),
     )
 
 
