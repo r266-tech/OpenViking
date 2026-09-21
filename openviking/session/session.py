@@ -4510,10 +4510,7 @@ class Session:
                     response = await vlm.get_completion_async(
                         prompt=prompt,
                         tools=[WM_CREATE_WITH_CHECKPOINTS_TOOL],
-                        tool_choice={
-                            "type": "function",
-                            "function": {"name": "create_working_memory"},
-                        },
+                        tool_choice="auto",
                     )
                     if not (
                         getattr(response, "has_tool_calls", False)

@@ -59,6 +59,56 @@ async def test_wm_update_accepts_auto_only_provider(monkeypatch, result_kind):
             fallback.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prior", ["", "Legacy session summary"])
+@pytest.mark.parametrize("result_kind", ["tool", "text", "missing_checkpoint"])
+async def test_wm_creation_accepts_auto_only_provider(monkeypatch, prior, result_kind):
+    session = Session(viking_fs=None)
+    working_memory = _wm()
+
+    async def complete(**kwargs):
+        if kwargs["tool_choice"] != "auto":
+            raise ValueError("Thinking mode does not support this tool_choice")
+        assert kwargs["tools"][0]["function"]["name"] == "create_working_memory"
+        return SimpleNamespace(
+            has_tool_calls=result_kind != "text",
+            tool_calls=[
+                SimpleNamespace(
+                    arguments={
+                        "working_memory": working_memory,
+                        "checkpoint_summaries": []
+                        if result_kind == "missing_checkpoint"
+                        else ["Compatibility verified."],
+                    }
+                )
+            ]
+            if result_kind != "text"
+            else [],
+        )
+
+    vlm = SimpleNamespace(is_available=lambda: True, get_completion_async=complete)
+    monkeypatch.setattr(
+        "openviking.session.session.get_openviking_config",
+        lambda: SimpleNamespace(vlm=vlm),
+    )
+    monkeypatch.setattr(
+        "openviking.session.session.resolve_output_language_from_conversation",
+        lambda *args, **kwargs: "English",
+    )
+    messages = [Message(id="u1", role="user", parts=[TextPart("Continue the task")])]
+    requests = [_CheckpointRequest("u1", ("u1",), 100, 200)]
+    if result_kind == "tool":
+        result = await session._generate_archive_summary_async(messages, prior, requests)
+        assert result.overview == working_memory
+        assert result.checkpoint_summaries == ("Compatibility verified.",)
+    else:
+        error = (
+            "no create_working_memory tool call" if result_kind == "text" else "exactly 1 strings"
+        )
+        with pytest.raises(ValueError, match=error):
+            await session._generate_archive_summary_async(messages, prior, requests)
+
+
 def _wm(
     *,
     current_state: str = "Actively updating Working Memory v2 prompts.",
