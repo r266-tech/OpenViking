@@ -159,3 +159,54 @@ async def test_batched_merge_resolves_placeholders_from_merge_output(monkeypatch
         "[second](viking://resources/业务%20docs/第二章%23file.md)"
     )
     assert "viking://input_sample_" not in overview
+
+
+@pytest.mark.asyncio
+async def test_single_overview_skips_prompt_when_rendered_template_exceeds_budget(monkeypatch):
+    vlm = RecordingVLM()
+    config = SimpleNamespace(
+        vlm=vlm,
+        semantic=SimpleNamespace(max_overview_prompt_chars=20, overview_batch_size=10),
+        output_language_override="en",
+    )
+    monkeypatch.setattr(semantic_processor_module, "get_openviking_config", lambda: config)
+    monkeypatch.setattr(semantic_processor_module, "render_prompt", lambda _name, _values: "x" * 21)
+
+    overview = await SemanticProcessor()._generate_overview(
+        "viking://resources/root",
+        file_summaries=[{"name": "a", "summary": "b"}],
+        children_abstracts=[],
+    )
+
+    assert overview.endswith("[Directory overview is not generated]")
+    assert vlm.prompts == []
+
+
+@pytest.mark.asyncio
+async def test_batched_overview_skips_oversized_partial_merge_prompt(monkeypatch):
+    vlm = RecordingVLM()
+    config = SimpleNamespace(
+        vlm=vlm,
+        semantic=SimpleNamespace(max_overview_prompt_chars=40, overview_batch_size=1),
+        output_language_override="en",
+    )
+    monkeypatch.setattr(semantic_processor_module, "get_openviking_config", lambda: config)
+
+    def fake_render_prompt(_name, values):
+        if values["file_summaries"].startswith("overview-"):
+            return "x" * 41
+        return "x" * 30
+
+    monkeypatch.setattr(semantic_processor_module, "render_prompt", fake_render_prompt)
+
+    overview = await SemanticProcessor()._generate_overview(
+        "viking://resources/root",
+        file_summaries=[
+            {"name": "a", "summary": "one"},
+            {"name": "b", "summary": "two"},
+        ],
+        children_abstracts=[],
+    )
+
+    assert len(vlm.prompts) == 2
+    assert overview.endswith("[Directory overview is not generated]")
