@@ -1703,6 +1703,7 @@ class SemanticProcessor(DequeueHandlerBase):
         vlm: "VLMHandle",
     ) -> str:
         """Generate overview from a single prompt (small directories)."""
+        config = get_openviking_config()
 
         try:
             prompt = render_prompt(
