@@ -240,6 +240,7 @@ class TestCrashRecovery(unittest.TestCase):
             shutil.rmtree(DB_PATH_ROBUST)
 
     def tearDown(self):
+        self.doCleanups()
         if os.path.exists(DB_PATH_CRASH):
             shutil.rmtree(DB_PATH_CRASH)
         if os.path.exists(DB_PATH_ROBUST):
