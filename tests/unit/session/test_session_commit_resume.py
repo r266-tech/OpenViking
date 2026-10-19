@@ -6,16 +6,21 @@ import inspect
 import json
 from dataclasses import fields
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock
 
 import pytest
 
 from openviking.message import Message, TextPart, ToolPart
+from openviking.service.task_queue_middleware import TaskWorkQueueMiddleware
 from openviking.service.task_store import PersistentTaskStore
 from openviking.service.task_tracker import TaskStatus, TaskTracker, set_task_tracker
+from openviking.service.task_work_index import bind_task_context, get_task_context
 from openviking.session.memory_policy import MemoryPolicy
 from openviking.session.session import Session
+from openviking.storage.queuefs.queue_middleware import EnqueueContext
 from openviking.storage.queuefs.session_commit_msg import SessionCommitMsg
+from openviking.storage.viking_fs import VikingFS
 from tests.test_task_tracker import _FakeAgfs
 
 
@@ -67,13 +72,15 @@ class _MemoryVikingFS:
     async def read_file(self, uri, ctx=None):
         if uri not in self.files:
             raise FileNotFoundError(uri)
-        return self.files[uri]
+        content = self.files[uri]
+        return content.decode("utf-8") if isinstance(content, bytes) else content
 
     async def write_file(self, uri, content, ctx=None, lease_ref=None):
         self.files[uri] = content
 
     async def append_file(self, uri, content, ctx=None):
-        self.files[uri] += content
+        text = content.decode("utf-8") if isinstance(content, bytes) else content
+        self.files[uri] = await self.read_file(uri) + text
 
     async def exists(self, uri, ctx=None):
         return uri in self.files or any(path.startswith(f"{uri}/") for path in self.files)
@@ -118,9 +125,20 @@ async def test_commit_retention_boundary_and_pending_tokens_after_reload(
     tracker = TaskTracker(_TaskStore())
     monkeypatch.setattr("openviking.session.session._enabled_memory_types", lambda: set())
     monkeypatch.setattr("openviking.service.task_tracker.get_task_tracker", lambda: tracker)
+    queued = []
+    middleware = TaskWorkQueueMiddleware()
+
+    async def publish(ctx):
+        queued.append(ctx.payload)
+        ctx.committed = True
+        return "message-1"
+
+    async def enqueue(queue_name, payload):
+        return await middleware.enqueue(EnqueueContext(queue_name, payload), publish)
+
     monkeypatch.setattr(
         "openviking.storage.queuefs.get_queue_manager",
-        lambda: SimpleNamespace(enqueue=AsyncMock()),
+        lambda: SimpleNamespace(enqueue=enqueue),
     )
     session = Session(viking_fs=storage, session_id="session-1", session_uri=session_uri)
     turn_options = (
@@ -128,7 +146,15 @@ async def test_commit_retention_boundary_and_pending_tokens_after_reload(
         if keep_turns is not None
         else {}
     )
-    result = await session.commit_async(keep_recent_count=keep_count, **turn_options)
+    with bind_task_context("outer-task", "other-account", "other-user"):
+        outer_context = get_task_context()
+        result = await session.commit_async(keep_recent_count=keep_count, **turn_options)
+        assert get_task_context() is outer_context
+    assert len(queued) == 1
+    task = await tracker.get(result["task_id"], account_id="default", user_id="default")
+    assert task is not None
+    assert queued[0]["_task_account_id"] == task.account_id == "default"
+    assert queued[0]["_task_user_id"] == task.user_id == "default"
     archived = await session._archives.read_messages(result["archive_uri"])
     retained = messages[archive_count:]
     assert [message.id for message in archived] == [m.id for m in messages[:archive_count]]
@@ -149,6 +175,38 @@ async def test_commit_retention_boundary_and_pending_tokens_after_reload(
     fresh = Session(viking_fs=storage, session_id="session-1", session_uri=session_uri)
     await fresh.load()
     assert fresh.meta.pending_tokens == expected
+
+
+@pytest.mark.asyncio
+async def test_commit_task_store_failure_keeps_live_messages(monkeypatch):
+    session_uri = "viking://user/default/sessions/session-1"
+    message = Message(id="live", role="user", parts=[TextPart("keep this message")])
+    live_uri = f"{session_uri}/messages.jsonl"
+    live_content = message.to_jsonl() + "\n"
+    storage = _MemoryVikingFS({live_uri: live_content})
+    tracker = TaskTracker(_TaskStore())
+    monkeypatch.setattr(
+        tracker._store, "create", AsyncMock(side_effect=OSError("store unavailable"))
+    )
+    monkeypatch.setattr("openviking.service.task_tracker.get_task_tracker", lambda: tracker)
+    monkeypatch.setattr("openviking.session.session._enabled_memory_types", lambda: set())
+    enqueue = AsyncMock()
+    monkeypatch.setattr(
+        "openviking.storage.queuefs.get_queue_manager",
+        lambda: SimpleNamespace(enqueue=enqueue),
+    )
+    session = Session(
+        viking_fs=cast(VikingFS, storage), session_id="session-1", session_uri=session_uri
+    )
+
+    with pytest.raises(OSError, match="store unavailable"):
+        await session.commit_async()
+
+    enqueue.assert_not_awaited()
+    assert [m.id for m in session.messages] == ["live"]
+    assert await storage.read_file(live_uri) == live_content
+    failed = json.loads(await storage.read_file(f"{session_uri}/history/archive_001/.failed.json"))
+    assert failed["stage"] == "task_tracker_create"
 
 
 def test_phase2_auto_commit_policy_parameters_are_appended():
