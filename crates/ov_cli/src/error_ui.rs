@@ -244,15 +244,22 @@ pub(crate) fn report_for_runtime_error(command: impl Into<String>, error: &Error
             "ov config",
             copy(language, "Create a config", "创建配置"),
         )]),
-        Error::Config(message) => ErrorReport::new(copy(language, "Configuration Error", "配置错误"), message)
-            .with_command(command)
-            .with_actions(config_error_actions(message, language)),
-        Error::Language(message) => ErrorReport::new(copy(language, "Language Error", "语言错误"), message)
-            .with_command(command)
-            .with_actions(vec![
-                ErrorAction::new("ov language en", copy(language, "Use English", "使用英文")),
-                ErrorAction::new("ov language zh-CN", copy(language, "Use Simplified Chinese", "使用简体中文")),
-            ]),
+        Error::Config(message) => {
+            ErrorReport::new(copy(language, "Configuration Error", "配置错误"), message)
+                .with_command(command)
+                .with_actions(config_error_actions(message, language))
+        }
+        Error::Language(message) => {
+            ErrorReport::new(copy(language, "Language Error", "语言错误"), message)
+                .with_command(command)
+                .with_actions(vec![
+                    ErrorAction::new("ov language en", copy(language, "Use English", "使用英文")),
+                    ErrorAction::new(
+                        "ov language zh-CN",
+                        copy(language, "Use Simplified Chinese", "使用简体中文"),
+                    ),
+                ])
+        }
         Error::Timeout(message) => ErrorReport::new(
             copy(language, "Request Timeout", "请求超时"),
             copy(
@@ -264,24 +271,37 @@ pub(crate) fn report_for_runtime_error(command: impl Into<String>, error: &Error
         .with_command(command)
         .with_detail(message)
         .with_actions(vec![
-            ErrorAction::new("ov config", copy(language, "Increase the request timeout", "提高请求超时时间")),
-            ErrorAction::new("ov config show", copy(language, "Show the active config", "查看当前配置")),
-        ]),
-        Error::Network(message) => ErrorReport::new(
-            copy(language, "Connection Error", "连接错误"),
-            copy(
-                language,
-                "Could not reach OpenViking. The server may be offline, or this config points to the wrong URL.",
-                "无法连接 OpenViking。服务器可能未启动，或当前配置指向了错误的 URL。",
+            ErrorAction::new(
+                "ov config",
+                copy(language, "Increase the request timeout", "提高请求超时时间"),
             ),
-        )
-        .with_command(command)
-        .with_detail(message)
-        .with_actions(vec![
-            ErrorAction::new("ov config validate", copy(language, "Check the active config", "检查当前配置")),
-            ErrorAction::new("ov health", copy(language, "Run a quick server health check", "快速检查服务器健康状态")),
-            ErrorAction::new("ov config switch", copy(language, "Switch to another config", "切换到其他配置")),
+            ErrorAction::new(
+                "ov config show",
+                copy(language, "Show the active config", "查看当前配置"),
+            ),
         ]),
+        Error::Network(message) => {
+            ErrorReport::new(copy(language, "Connection Error", "连接错误"), message)
+                .with_command(command)
+                .with_actions(vec![
+                    ErrorAction::new(
+                        "ov config validate",
+                        copy(language, "Check the active config", "检查当前配置"),
+                    ),
+                    ErrorAction::new(
+                        "ov health",
+                        copy(
+                            language,
+                            "Run a quick server health check",
+                            "快速检查服务器健康状态",
+                        ),
+                    ),
+                    ErrorAction::new(
+                        "ov config switch",
+                        copy(language, "Switch to another config", "切换到其他配置"),
+                    ),
+                ])
+        }
         Error::Api {
             message, details, ..
         } if error.code() == "REFRESH_FAILED" => {
@@ -320,10 +340,18 @@ pub(crate) fn report_for_runtime_error(command: impl Into<String>, error: &Error
         )
         .with_command(command)
         .with_actions(vec![
-            ErrorAction::new("ov config", copy(language, "Edit this config", "编辑这个配置")),
-            ErrorAction::new("ov config switch", copy(language, "Use another config", "使用其他配置")),
+            ErrorAction::new(
+                "ov config",
+                copy(language, "Edit this config", "编辑这个配置"),
+            ),
+            ErrorAction::new(
+                "ov config switch",
+                copy(language, "Use another config", "使用其他配置"),
+            ),
         ]),
-        Error::Api { message, details, .. } => {
+        Error::Api {
+            message, details, ..
+        } => {
             let mut report = ErrorReport::new(
                 copy(language, "OpenViking API Error", "OpenViking API 错误"),
                 api_error_message(error.code(), message),
@@ -338,34 +366,59 @@ pub(crate) fn report_for_runtime_error(command: impl Into<String>, error: &Error
             copy(language, "Command Error", "命令错误"),
             sentence_case_error(message),
         )
-            .with_command(command.clone())
-            .with_actions(contextual_help_actions(&command, language)),
+        .with_command(command.clone())
+        .with_actions(contextual_help_actions(&command, language)),
         Error::Parse(message) => ErrorReport::new(
             copy(language, "Parse Error", "解析错误"),
             sentence_case_error(message),
         )
-            .with_command(command.clone())
-            .with_actions(contextual_help_actions(&command, language)),
-        Error::Output(message) => ErrorReport::new(copy(language, "Output Error", "输出错误"), message).with_command(command),
+        .with_command(command.clone())
+        .with_actions(contextual_help_actions(&command, language)),
+        Error::Output(message) => {
+            ErrorReport::new(copy(language, "Output Error", "输出错误"), message)
+                .with_command(command)
+        }
         Error::InvalidPath(message) => ErrorReport::new(
             copy(language, "Invalid Path", "路径无效"),
             sentence_case_error(message),
         )
-            .with_command(command.clone())
-            .with_actions(contextual_help_actions(&command, language)),
-        Error::Io(error) => ErrorReport::new(copy(language, "IO Error", "IO 错误"), copy(language, "OpenViking could not read or write a file.", "OpenViking 无法读取或写入文件。"))
-            .with_command(command)
-            .with_detail(error.to_string()),
-        Error::Serialization(error) => {
-            ErrorReport::new(copy(language, "Serialization Error", "序列化错误"), copy(language, "OpenViking could not parse structured data.", "OpenViking 无法解析结构化数据。"))
-                .with_command(command)
-                .with_detail(error.to_string())
-        }
-        Error::Zip(error) => ErrorReport::new(copy(language, "Archive Error", "压缩包错误"), copy(language, "OpenViking could not process the archive.", "OpenViking 无法处理压缩包。"))
-            .with_command(command)
-            .with_detail(error.to_string()),
-        Error::AlreadyReported => ErrorReport::new(copy(language, "Command Error", "命令错误"), copy(language, "The command failed.", "命令执行失败。"))
-            .with_command(command),
+        .with_command(command.clone())
+        .with_actions(contextual_help_actions(&command, language)),
+        Error::Io(error) => ErrorReport::new(
+            copy(language, "IO Error", "IO 错误"),
+            copy(
+                language,
+                "OpenViking could not read or write a file.",
+                "OpenViking 无法读取或写入文件。",
+            ),
+        )
+        .with_command(command)
+        .with_detail(error.to_string()),
+        Error::Serialization(error) => ErrorReport::new(
+            copy(language, "Serialization Error", "序列化错误"),
+            copy(
+                language,
+                "OpenViking could not parse structured data.",
+                "OpenViking 无法解析结构化数据。",
+            ),
+        )
+        .with_command(command)
+        .with_detail(error.to_string()),
+        Error::Zip(error) => ErrorReport::new(
+            copy(language, "Archive Error", "压缩包错误"),
+            copy(
+                language,
+                "OpenViking could not process the archive.",
+                "OpenViking 无法处理压缩包。",
+            ),
+        )
+        .with_command(command)
+        .with_detail(error.to_string()),
+        Error::AlreadyReported => ErrorReport::new(
+            copy(language, "Command Error", "命令错误"),
+            copy(language, "The command failed.", "命令执行失败。"),
+        )
+        .with_command(command),
     }
 }
 
@@ -1179,7 +1232,8 @@ Usage: ov config [OPTIONS] [COMMAND]
         let rendered = strip_ansi(&render_report(&report, false));
 
         assert!(rendered.contains("Connection Error"));
-        assert!(rendered.contains("Could not reach OpenViking"));
+        assert!(rendered.contains("connection refused"));
+        assert!(!rendered.contains("server may be offline"));
         assert!(rendered.contains("ov config validate"));
         assert!(rendered.contains("ov health"));
         assert!(rendered.contains("ov config switch"));

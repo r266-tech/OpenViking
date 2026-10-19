@@ -92,7 +92,14 @@ impl Error {
         } else if error.is_builder() {
             Self::Client(format!("{context}: {error}"))
         } else {
-            Self::Network(format!("{context}: {error}"))
+            let mut message = format!("{context}: {error}");
+            let mut source = std::error::Error::source(&error);
+            while let Some(cause) = source {
+                message.push_str(": ");
+                message.push_str(&cause.to_string());
+                source = cause.source();
+            }
+            Self::Network(message)
         }
     }
 
