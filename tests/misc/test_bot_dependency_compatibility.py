@@ -43,3 +43,12 @@ def test_locked_openviking_sdk_supports_remote_skill_integrity() -> None:
         target_uri="viking://agent/skills",
         include_integrity=True,
     )
+
+
+def test_root_dockerfile_sdk_guard_covers_server_git_diff_paths() -> None:
+    """The separately released SDK must expose the Git API used by the server."""
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+    assert (
+        "'AsyncHTTPClient.git_diff_paths': hasattr(AsyncHTTPClient, 'git_diff_paths')" in dockerfile
+    )
